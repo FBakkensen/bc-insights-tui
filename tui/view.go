@@ -155,7 +155,7 @@ func (m Model) View() string {
 		var paletteContent strings.Builder
 		paletteContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("226")).Render("Command Palette"))
 		paletteContent.WriteString("\n")
-		paletteContent.WriteString("Examples: 'set' to list settings, 'set fetchSize=100'\n")
+		paletteContent.WriteString("Examples: 'set' to list settings, 'set fetchSize=100', 'set environment=prod', 'set applicationInsightsKey=YOUR_KEY'\n")
 		paletteContent.WriteString("Press Esc to close, Enter to execute\n\n")
 		paletteContent.WriteString("> " + m.CommandInput)
 

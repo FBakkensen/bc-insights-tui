@@ -95,14 +95,25 @@ func TestFindConfigFile_HomeDirectory(t *testing.T) {
 	defer os.Chdir(originalWd)
 	os.Chdir(workingDir)
 
-	// Mock home directory by temporarily setting environment
+	// Mock home directory by temporarily setting environment variables
+	// On Unix-like systems, os.UserHomeDir() uses HOME
+	// On Windows, os.UserHomeDir() uses USERPROFILE
 	originalHome := os.Getenv("HOME")
+	originalUserProfile := os.Getenv("USERPROFILE")
+
 	os.Setenv("HOME", homeDir)
+	os.Setenv("USERPROFILE", homeDir)
+
 	defer func() {
 		if originalHome != "" {
 			os.Setenv("HOME", originalHome)
 		} else {
 			os.Unsetenv("HOME")
+		}
+		if originalUserProfile != "" {
+			os.Setenv("USERPROFILE", originalUserProfile)
+		} else {
+			os.Unsetenv("USERPROFILE")
 		}
 	}()
 

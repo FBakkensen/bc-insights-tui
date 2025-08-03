@@ -12,6 +12,13 @@ import (
 	"strings"
 )
 
+const (
+	// Flag names
+	flagEnvironment = "environment"
+	flagFetchSize   = "fetch-size"
+	flagAppInsights = "app-insights-key"
+)
+
 // Config holds application settings
 type Config struct {
 	LogFetchSize           int    `json:"fetchSize" yaml:"fetchSize"`
@@ -30,19 +37,10 @@ func LoadConfig() Config {
 
 // LoadConfigWithArgs loads configuration with the specified command line arguments
 func LoadConfigWithArgs(args []string) Config {
-	// Create a new flag set to avoid conflicts during testing
-	flagSet := flag.NewFlagSet("bc-insights-tui", flag.ContinueOnError)
-	flagSet.Usage = func() {} // Suppress usage output during tests
-
-	var (
-		fetchSizeFlag   = flagSet.Int("fetch-size", -1, "Number of log entries to fetch per request")
-		environmentFlag = flagSet.String("environment", "\x00", "Environment name (e.g., Development, Production)")
-		appInsightsFlag = flagSet.String("app-insights-key", "\x00", "Application Insights connection string")
-		configFileFlag  = flagSet.String("config", "", "Path to configuration file (JSON)")
-	)
-
-	// Parse arguments, ignoring errors (for compatibility)
+	flagSet, flags := setupFlags()
 	_ = flagSet.Parse(args)
+
+	flagsSet := trackSetFlags(flagSet)
 
 	// Start with default values
 	cfg := Config{
@@ -52,19 +50,78 @@ func LoadConfigWithArgs(args []string) Config {
 	}
 
 	// Load from configuration file if specified or found
-	configFile := *configFileFlag
+	loadConfigFromFileIfExists(&cfg, *flags.configFile)
+
+	// Override with environment variables
+	applyEnvironmentVariables(&cfg)
+
+	// Override with command line flags (highest priority)
+	applyCommandLineFlags(&cfg, flags, flagsSet)
+
+	return cfg
+}
+
+// setupFlags creates and configures the flag set
+func setupFlags() (*flag.FlagSet, *flagValues) {
+	flagSet := flag.NewFlagSet("bc-insights-tui", flag.ContinueOnError)
+	flagSet.Usage = func() {} // Suppress usage output during tests
+
+	flags := &flagValues{
+		fetchSize:   flagSet.Int(flagFetchSize, -1, "Number of log entries to fetch per request"),
+		environment: flagSet.String(flagEnvironment, "", "Environment name (e.g., Development, Production)"),
+		appInsights: flagSet.String(flagAppInsights, "", "Application Insights connection string"),
+		configFile:  flagSet.String("config", "", "Path to configuration file (JSON)"),
+	}
+
+	return flagSet, flags
+}
+
+// flagValues holds pointers to flag values
+type flagValues struct {
+	fetchSize   *int
+	environment *string
+	appInsights *string
+	configFile  *string
+}
+
+// flagsSet tracks which flags were explicitly set
+type flagsSet struct {
+	fetchSize   bool
+	environment bool
+	appInsights bool
+}
+
+// trackSetFlags tracks which flags were explicitly set by the user
+func trackSetFlags(flagSet *flag.FlagSet) flagsSet {
+	var flags flagsSet
+	flagSet.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case flagFetchSize:
+			flags.fetchSize = true
+		case flagEnvironment:
+			flags.environment = true
+		case flagAppInsights:
+			flags.appInsights = true
+		}
+	})
+	return flags
+}
+
+// loadConfigFromFileIfExists loads configuration from file if it exists
+func loadConfigFromFileIfExists(cfg *Config, configFile string) {
 	if configFile == "" {
-		// Look for config files in standard locations
 		configFile = findConfigFile()
 	}
 	if configFile != "" {
 		if fileConfig, err := loadConfigFromFile(configFile); err == nil {
-			mergeConfig(&cfg, fileConfig)
+			mergeConfig(cfg, fileConfig)
 		}
 		// Silently ignore file loading errors - not critical
 	}
+}
 
-	// Override with environment variables
+// applyEnvironmentVariables applies environment variable overrides
+func applyEnvironmentVariables(cfg *Config) {
 	if val := os.Getenv("LOG_FETCH_SIZE"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
 			cfg.LogFetchSize = parsed
@@ -76,22 +133,19 @@ func LoadConfigWithArgs(args []string) Config {
 	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
 		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
 	}
+}
 
-	// Override with command line flags (highest priority)
-	// Use sentinel values to detect if flags were explicitly set
-	if *fetchSizeFlag != -1 { // -1 means not set
-		if *fetchSizeFlag > 0 { // Only override if positive
-			cfg.LogFetchSize = *fetchSizeFlag
-		}
+// applyCommandLineFlags applies command line flag overrides
+func applyCommandLineFlags(cfg *Config, flags *flagValues, flagsSet flagsSet) {
+	if flagsSet.fetchSize && *flags.fetchSize > 0 { // Only override if positive and explicitly set
+		cfg.LogFetchSize = *flags.fetchSize
 	}
-	if *environmentFlag != "\x00" { // \x00 means not set
-		cfg.Environment = *environmentFlag // Allow empty string to override
+	if flagsSet.environment { // Allow empty string to override if flag was explicitly set
+		cfg.Environment = *flags.environment
 	}
-	if *appInsightsFlag != "\x00" { // \x00 means not set
-		cfg.ApplicationInsightsKey = *appInsightsFlag // Allow empty string to override
+	if flagsSet.appInsights { // Allow empty string to override if flag was explicitly set
+		cfg.ApplicationInsightsKey = *flags.appInsights
 	}
-
-	return cfg
 }
 
 // findConfigFile looks for configuration files in standard locations
