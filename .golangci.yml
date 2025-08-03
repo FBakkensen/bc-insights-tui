@@ -1,0 +1,91 @@
+# golangci-lint configuration for bc-insights-tui
+# See https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  govet:
+    # Enable all analyzers
+    enable-all: true
+    # Disable analyzers by name
+    disable:
+      - fieldalignment # Too strict for TUI models
+
+  gocyclo:
+    min-complexity: 15
+
+  golint:
+    min-confidence: 0.8
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  misspell:
+    locale: US
+
+  unused:
+    go: "1.24"
+
+  gofumpt:
+    extra-rules: true
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis
+    - typecheck     # Type checking
+    - unused        # Find unused code
+    - gofmt         # Format code
+    - goimports     # Organize imports
+    - goconst       # Find repeated strings
+    - gocyclo       # Check cyclomatic complexity
+    - misspell      # Check for misspellings
+    - unconvert     # Remove unnecessary conversions
+    - dupl          # Find duplicated code
+    - gosec         # Security audit
+    - gofumpt       # Stricter gofmt
+
+  disable:
+    - varnamelen    # Variable name length (too strict for TUI)
+    - exhaustruct   # Exhaustive struct initialization (too strict)
+    - wrapcheck     # Wrap errors (can be too verbose)
+    - nlreturn      # New line return (stylistic preference)
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+
+    # Exclude some staticcheck messages for TUI models
+    - linters:
+        - staticcheck
+      text: "SA1019:" # Ignore deprecation warnings for stable APIs
+
+    # Allow embedding in TUI models (common pattern in Bubble Tea)
+    - path: tui/
+      linters:
+        - golint
+      text: "should not use dot imports"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
