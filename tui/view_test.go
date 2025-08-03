@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -14,19 +15,29 @@ func TestView_BasicOutput(t *testing.T) {
 	output := model.View()
 
 	// Test welcome message is included
-	if !strings.Contains(output, model.WelcomeMsg) {
-		t.Errorf("Expected output to contain welcome message %q", model.WelcomeMsg)
+	if !strings.Contains(output, "Welcome to bc-insights-tui!") {
+		t.Errorf("Expected output to contain welcome message")
 	}
 
-	// Test help text is included
-	if !strings.Contains(output, model.HelpText) {
-		t.Errorf("Expected output to contain help text %q", model.HelpText)
+	// Test Business Central context is included
+	if !strings.Contains(output, "Business Central") {
+		t.Errorf("Expected output to contain Business Central context")
 	}
 
-	// Test basic structure
+	// Test essential keyboard shortcuts are included
+	if !strings.Contains(output, "Ctrl+P") {
+		t.Errorf("Expected output to contain Ctrl+P shortcut")
+	}
+
+	// Test configuration is displayed
+	if !strings.Contains(output, "Log fetch size: 50") {
+		t.Errorf("Expected output to contain log fetch size configuration")
+	}
+
+	// Test basic structure - should have header, content area, and footer
 	lines := strings.Split(output, "\n")
-	if len(lines) < 3 {
-		t.Errorf("Expected at least 3 lines in output, got %d", len(lines))
+	if len(lines) < 10 {
+		t.Errorf("Expected at least 10 lines in full-screen output, got %d", len(lines))
 	}
 }
 
@@ -38,7 +49,7 @@ func TestView_TerminalSizeDisplay(t *testing.T) {
 
 	output := model.View()
 
-	expectedSize := "Terminal size: 100x30"
+	expectedSize := "Terminal: 100x30"
 	if !strings.Contains(output, expectedSize) {
 		t.Errorf("Expected output to contain %q, got:\n%s", expectedSize, output)
 	}
@@ -61,8 +72,9 @@ func TestView_ConfigValues(t *testing.T) {
 
 			output := model.View()
 
-			if !strings.Contains(output, "Log fetch size:") {
-				t.Errorf("Expected output to contain log fetch size information, got:\n%s", output)
+			expectedConfig := fmt.Sprintf("Log fetch size: %d", tc.fetchSize)
+			if !strings.Contains(output, expectedConfig) {
+				t.Errorf("Expected output to contain %q, got:\n%s", expectedConfig, output)
 			}
 		})
 	}
@@ -75,13 +87,13 @@ func TestView_CommandPaletteClosed(t *testing.T) {
 
 	output := model.View()
 
-	// Command palette should not be visible
-	if strings.Contains(output, "Command Palette") {
-		t.Errorf("Expected no command palette in output when closed, got:\n%s", output)
+	// Command palette overlay should not be visible
+	if strings.Contains(output, "Press Esc to close, Enter to execute") {
+		t.Errorf("Expected no command palette overlay in output when closed, got:\n%s", output)
 	}
 
-	if strings.Contains(output, "press Esc to close") {
-		t.Errorf("Expected no escape instruction when palette is closed, got:\n%s", output)
+	if strings.Contains(output, "╔════") {
+		t.Errorf("Expected no command palette borders when palette is closed, got:\n%s", output)
 	}
 }
 
@@ -98,7 +110,7 @@ func TestView_CommandPaletteOpen(t *testing.T) {
 		t.Errorf("Expected command palette header in output, got:\n%s", output)
 	}
 
-	if !strings.Contains(output, "press Esc to close") {
+	if !strings.Contains(output, "Press Esc to close") {
 		t.Errorf("Expected escape instruction in output, got:\n%s", output)
 	}
 
@@ -152,22 +164,33 @@ func TestView_WindowSizeVariations(t *testing.T) {
 
 			output := model.View()
 
-			// Verify terminal size is displayed correctly
-			if !strings.Contains(output, "Terminal size:") {
-				t.Errorf("Expected terminal size in output for %s, got:\n%s", tc.name, output)
+			// Verify terminal size is displayed correctly in footer
+			expectedTerminalSize := fmt.Sprintf("Terminal: %dx%d", tc.width, tc.height)
+			if !strings.Contains(output, expectedTerminalSize) {
+				t.Errorf("Expected terminal size %s in output for %s, got:\n%s", expectedTerminalSize, tc.name, output)
 			}
 
-			// Test command palette border respects width
+			// Verify basic layout elements are present
+			if !strings.Contains(output, "bc-insights-tui") {
+				t.Errorf("Expected application name in output for %s", tc.name)
+			}
+
+			if !strings.Contains(output, "Welcome to bc-insights-tui!") {
+				t.Errorf("Expected welcome message in output for %s", tc.name)
+			}
+
+			// Test command palette works with different sizes
 			model.CommandPalette = true
+			model.CommandInput = "test"
 			output = model.View()
 
-			// The border should not exceed window width or 50 characters
-			expectedMaxBorder := min(tc.width, 50)
-			borderLine := strings.Repeat("─", expectedMaxBorder)
+			// Command palette should appear in overlay regardless of size
+			if !strings.Contains(output, "Command Palette") {
+				t.Errorf("Expected command palette in output for %s when palette is open", tc.name)
+			}
 
-			if tc.width >= 50 && !strings.Contains(output, borderLine) {
-				t.Errorf("Expected border of length %d for width %d, got output:\n%s",
-					expectedMaxBorder, tc.width, output)
+			if !strings.Contains(output, "> test") {
+				t.Errorf("Expected command input in palette for %s", tc.name)
 			}
 		})
 	}
@@ -187,9 +210,10 @@ func TestView_ConsistentStructure(t *testing.T) {
 
 	// Both outputs should contain the basic elements
 	basicElements := []string{
-		model.WelcomeMsg,
-		"Press q to quit",
-		"Terminal size:",
+		"Welcome to bc-insights-tui!",
+		"Ctrl+P",
+		"Terminal:",
+		"Business Central",
 	}
 
 	for _, element := range basicElements {
@@ -202,10 +226,10 @@ func TestView_ConsistentStructure(t *testing.T) {
 		}
 	}
 
-	// Only the command palette version should have palette elements
+	// Only the command palette version should have palette overlay elements
 	paletteElements := []string{
-		"Command Palette",
-		"press Esc to close",
+		"╔════",
+		"Press Esc to close, Enter to execute",
 		"> test",
 	}
 
@@ -256,5 +280,238 @@ func TestView_StringFormatting(t *testing.T) {
 	if maxConsecutiveEmpty > 3 {
 		t.Errorf("Expected no more than 3 consecutive empty lines, found %d in:\n%s",
 			maxConsecutiveEmpty, output)
+	}
+}
+
+// New tests for full-screen welcome view functionality
+
+func TestView_FullScreenLayout(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+	model.WindowWidth = 120
+	model.WindowHeight = 40
+
+	output := model.View()
+
+	// Test header bar with application title and version
+	if !strings.Contains(output, "bc-insights-tui v1.0.0") {
+		t.Errorf("Expected header to contain application name and version")
+	}
+
+	if !strings.Contains(output, "Welcome - Business Central Developer Tools") {
+		t.Errorf("Expected header to contain Business Central context")
+	}
+
+	// Test main content area structure
+	if !strings.Contains(output, "╭") || !strings.Contains(output, "╰") {
+		t.Errorf("Expected bordered layout with rounded corners")
+	}
+
+	// Test footer bar with keyboard shortcuts and system info
+	if !strings.Contains(output, "[Ctrl+P] Open Command Palette") {
+		t.Errorf("Expected footer to contain command palette shortcut")
+	}
+
+	if !strings.Contains(output, "[Ctrl+C] Quit") {
+		t.Errorf("Expected footer to contain quit shortcut")
+	}
+
+	if !strings.Contains(output, "Terminal: 120x40") {
+		t.Errorf("Expected footer to contain terminal size")
+	}
+}
+
+func TestView_ApplicationVersionDisplay(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	if !strings.Contains(output, AppVersion) {
+		t.Errorf("Expected output to contain application version %s", AppVersion)
+	}
+
+	if !strings.Contains(output, "bc-insights-tui v1.0.0") {
+		t.Errorf("Expected output to contain formatted application name with version")
+	}
+}
+
+func TestView_BusinessCentralContext(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test Business Central context is prominently displayed
+	if !strings.Contains(output, "Business Central Developer Tools") {
+		t.Errorf("Expected header to emphasize Business Central developer tools")
+	}
+
+	if !strings.Contains(output, "Microsoft Dynamics 365 Business Central") {
+		t.Errorf("Expected main content to mention target audience")
+	}
+
+	if !strings.Contains(output, "command palette") && !strings.Contains(output, "workflow") {
+		t.Errorf("Expected content to describe the command palette workflow")
+	}
+}
+
+func TestView_AuthenticationStatus(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test authentication placeholder
+	if !strings.Contains(output, "Not authenticated") {
+		t.Errorf("Expected authentication status placeholder")
+	}
+
+	if !strings.Contains(output, "authentication required") {
+		t.Errorf("Expected authentication requirement message")
+	}
+
+	if !strings.Contains(output, "🔧 Current Status:") {
+		t.Errorf("Expected status section with icon")
+	}
+}
+
+func TestView_ApplicationStateDisplay(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test current state is clearly displayed
+	if !strings.Contains(output, "Current Status:") {
+		t.Errorf("Expected current status display")
+	}
+
+	// Should indicate ready state with authentication requirement
+	if !strings.Contains(output, "Not authenticated") {
+		t.Errorf("Expected to show authentication required state")
+	}
+}
+
+func TestView_EnhancedContent(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test enhanced welcome messaging
+	if !strings.Contains(output, "Terminal User Interface for Azure Application Insights") {
+		t.Errorf("Expected detailed application description")
+	}
+
+	// Test AI feature preview
+	if !strings.Contains(output, "AI-powered KQL query generation") {
+		t.Errorf("Expected AI feature preview")
+	}
+
+	if !strings.Contains(output, "Phase 5") {
+		t.Errorf("Expected phase information for AI features")
+	}
+
+	if !strings.Contains(output, "natural language to generate complex queries") {
+		t.Errorf("Expected AI feature explanation")
+	}
+
+	// Test comprehensive keyboard shortcuts
+	shortcuts := []string{"Ctrl+P", "Ctrl+C", "q", "Esc"}
+	for _, shortcut := range shortcuts {
+		if !strings.Contains(output, shortcut) {
+			t.Errorf("Expected keyboard shortcut %s to be documented", shortcut)
+		}
+	}
+}
+
+func TestView_ResponsiveDesign(t *testing.T) {
+	testCases := []struct {
+		name   string
+		width  int
+		height int
+	}{
+		{"very small", 40, 10},
+		{"small", 60, 20},
+		{"medium", 80, 24},
+		{"large", 120, 40},
+		{"very large", 200, 60},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Config{LogFetchSize: 50}
+			model := InitialModel(cfg)
+			model.WindowWidth = tc.width
+			model.WindowHeight = tc.height
+
+			output := model.View()
+
+			// Layout should adapt to terminal size
+			expectedTerminalSize := fmt.Sprintf("%dx%d", tc.width, tc.height)
+			if !strings.Contains(output, expectedTerminalSize) {
+				t.Errorf("Expected terminal size %s in output for %s, got:\n%s", expectedTerminalSize, tc.name, output)
+			}
+
+			// Essential elements should be present regardless of size
+			essentialElements := []string{
+				"bc-insights-tui",
+				"Welcome to bc-insights-tui!",
+				"Ctrl+P",
+				"Business Central",
+			}
+
+			for _, element := range essentialElements {
+				if !strings.Contains(output, element) {
+					t.Errorf("Expected essential element %q to be present in %s terminal", element, tc.name)
+				}
+			}
+		})
+	}
+}
+
+func TestView_ColorSchemeCompatibility(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test that output doesn't contain problematic characters or sequences
+	// that might not work in different terminal environments
+	if strings.Contains(output, "\x1b[") {
+		// This would indicate raw ANSI escape sequences, which lipgloss should handle
+		t.Logf("Note: ANSI escape sequences detected - this is expected with lipgloss styling")
+	}
+
+	// Basic structure should work in any terminal
+	if !strings.Contains(output, "Welcome to bc-insights-tui!") {
+		t.Errorf("Expected basic text content to be present")
+	}
+}
+
+func TestView_ProfessionalStyling(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test professional visual elements are present
+	stylingElements := []string{
+		"╭", "╰", "│", // Box drawing characters for borders
+		"🔧", "📋", "🤖", "⚙️", // Icons for visual hierarchy
+		"•", // Bullet points for lists
+	}
+
+	for _, element := range stylingElements {
+		if !strings.Contains(output, element) {
+			t.Errorf("Expected styling element %q for professional appearance", element)
+		}
+	}
+
+	// Test content organization with proper spacing
+	lines := strings.Split(output, "\n")
+	if len(lines) < 20 {
+		t.Errorf("Expected full-screen layout to have substantial content, got %d lines", len(lines))
 	}
 }

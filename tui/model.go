@@ -9,6 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const AppVersion = "v1.0.0"
+
 type Model struct {
 	WelcomeMsg     string
 	HelpText       string

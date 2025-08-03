@@ -169,7 +169,7 @@ func TestMain_TerminalResizeIntegration(t *testing.T) {
 
 	// Verify size appears in view
 	view := updatedModel.View()
-	if !strings.Contains(view, "Terminal size: 100x30") {
+	if !strings.Contains(view, "Terminal: 100x30") {
 		t.Errorf("Expected view to contain terminal size, got: %s", view)
 	}
 }
