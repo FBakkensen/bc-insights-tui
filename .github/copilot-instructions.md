@@ -15,6 +15,19 @@ go fmt ./...; go vet ./...; golangci-lint run --fast
 
 **Linting Configuration**: `.golangci.yml` includes strict rules with exceptions for TUI patterns (disabled `fieldalignment` for TUI models, allows embedding in TUI components).
 
+### ⚠️ MANDATORY: Documentation Research
+**BEFORE implementing any feature or fixing configuration issues**, you MUST use Context7 MCP to get up-to-date documentation:
+```
+1. Use mcp_context7_resolve-library-id to find the correct library
+2. Use mcp_context7_get-library-docs to get current documentation
+3. Verify configuration/implementation against latest docs
+```
+
+**Examples:**
+- Before changing `.golangci.yml` → Search for `golangci-lint` documentation
+- Before implementing OAuth2 → Search for `azure` or `oauth2` documentation
+- Before using Bubble Tea patterns → Search for `bubbletea` or `charm` documentation
+
 ### Phase-Based Development
 1. ✅ **Phase 1**: Basic TUI skeleton and configuration (COMPLETE)
 2. 🚧 **Phase 2**: Azure OAuth2 authentication with device flow (auth/authenticator.go placeholder)

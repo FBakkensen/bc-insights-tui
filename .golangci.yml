@@ -24,9 +24,6 @@ linters-settings:
   gocyclo:
     min-complexity: 15
 
-  golint:
-    min-confidence: 0.8
-
   goconst:
     min-len: 3
     min-occurrences: 3
@@ -34,11 +31,15 @@ linters-settings:
   misspell:
     locale: US
 
-  unused:
-    go: "1.24"
-
   gofumpt:
     extra-rules: true
+
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+      - name: package-comments
+        disabled: true
 
 linters:
   enable:
@@ -58,6 +59,7 @@ linters:
     - dupl          # Find duplicated code
     - gosec         # Security audit
     - gofumpt       # Stricter gofmt
+    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go (replacement for golint)
 
   disable:
     - varnamelen    # Variable name length (too strict for TUI)
@@ -83,7 +85,7 @@ issues:
     # Allow embedding in TUI models (common pattern in Bubble Tea)
     - path: tui/
       linters:
-        - golint
+        - revive
       text: "should not use dot imports"
 
   max-issues-per-linter: 0
