@@ -1,0 +1,123 @@
+# Project: bc-insights-tui
+
+**A Terminal User Interface for Azure Application Insights**
+
+---
+
+## 1. Overview
+
+bc-insights-tui is a command-line tool for developers to view and query their Azure Application Insights logs directly from the comfort of their terminal. It aims to provide a fast, efficient, and keyboard-driven interface to reduce context switching and streamline the debugging process.
+
+The application will run on Windows, feature a low memory footprint, and provide a rich, interactive experience. A key feature will be an **AI-assisted query builder**, allowing users to generate complex KQL queries using natural language.
+
+---
+
+## 2. User Persona & Use Cases
+
+* **Primary User:** The Business Central Developer.
+* **Core Use Cases:**
+    * **Live Log Tailing:** Quickly view the latest logs as they come in and scroll through recent history to get an immediate sense of the application's health.
+    * **AI-Powered Querying:** Instead of manually writing complex Kusto Query Language (KQL), the developer can describe what they're looking for in plain English (e.g., "show me all failed logins from the last hour"). The tool will use an AI service to translate this into a valid KQL query that can be executed immediately.
+
+---
+
+## 3. Functional Requirements
+
+* **Online-Only:** The application will not support offline mode. All log data will be fetched directly from the Application Insights API on demand.
+* **No Local Log Storage:** Logs will not be stored or cached locally on the user's machine.
+* **Configurable Fetch Size:** Users can configure the number of logs to retrieve in a single API request.
+* **Pagination:** The interface will provide an option to "load more" logs, fetching the next batch of older log entries.
+* **Helpful Error Handling:** All authentication and API errors must be user-friendly. Messages should explain the likely cause of the problem and guide the user toward a resolution (e.g., checking permissions in Azure, correcting a config value).
+* **Dynamic Table Columns:** When a custom KQL query includes a `project` statement to select specific fields, the log list view must dynamically update its columns to match the fields selected in the query.
+* **Custom KQL Queries & Saving:** Users must be able to write their own KQL queries from scratch. The application should provide a mechanism to save these custom queries with a descriptive name for easy reuse.
+
+---
+
+## 4. Core Concepts: Business Central Telemetry
+
+A key aspect of Business Central logging is its dynamic and structured nature within Application Insights. Understanding this is crucial for the design of this tool.
+
+* **Primary Data Source:** Most log data is stored in the `traces` table.
+* **The `customDimensions` Field:** While standard columns exist, the most valuable, context-rich information for a log entry is stored in the `customDimensions` field. This field is a flexible key-value store.
+* **The `eventId` as a Schema Definer:** The structure of the data within `customDimensions` is determined by the `eventId`. Each `eventId` represents a specific type of event (e.g., a database lock, a web service call) and has its own unique set of fields within `customDimensions`.
+* **Dynamic and Extensible:** The list of `eventId`s and their corresponding schemas is not fixed. Microsoft adds new events with major releases, and partners can define their own custom events.
+
+This means **bc-insights-tui cannot rely on a static data model**. It must be architected to first read the `eventId` and then dynamically parse and display the associated key-value pairs from `customDimensions`.
+
+---
+
+## 5. Technology Stack
+
+This project will be built using Go and the Charm Bracelet ecosystem, chosen for its performance, excellent TUI capabilities, and strong community support.
+
+* **Language:** **Go**
+* **TUI Framework:** [**Bubble Tea**](https://github.com/charmbracelet/bubbletea)
+* **Styling & Components:** [**Lip Gloss**](https://github.com/charmbracelet/lipgloss) & [**Bubbles**](https://github.com/charmbracelet/bubbles)
+* **Authentication:** Standard Go HTTP libraries for OAuth2 Device Authorization Flow.
+* **AI Integration:** A client for an AI service like **Azure OpenAI**.
+
+---
+
+## 6. Architecture
+
+The project will follow a modular architecture to separate concerns.
+
+### Directory Structure
+
+```text
+bc-insights-tui/
+├── main.go                 # Entry point
+|
+├── tui/                    # All Bubble Tea UI code
+│   ├── model.go
+│   ├── update.go
+│   └── view.go
+|
+├── auth/                   # Azure OAuth2 logic
+│   └── authenticator.go
+|
+├── appinsights/            # Application Insights API client
+│   └── client.go
+|
+├── ai/                     # AI Service client for KQL generation
+│   └── assistant.go
+|
+└── config/                 # Application configuration
+    └── config.go
+```
+
+---
+
+## 7. Roadmap
+
+Development will proceed in phases to ensure a solid foundation and iterative progress.
+
+* **Phase 1: Basic TUI Skeleton & Config**
+    * [ ] Set up the project structure and Go modules.
+    * [ ] Create a basic Bubble Tea application that can be started and quit.
+    * [ ] Implement a simple view with a welcome message and help text.
+    * [ ] Implement basic configuration loading (e.g., for log fetch size).
+* **Phase 2: Authentication**
+    * [ ] Implement the OAuth2 Device Authorization Flow.
+    * [ ] Create a "Login" view in the TUI.
+    * [ ] Securely store and refresh authentication tokens.
+    * [ ] **Ensure all authentication errors are helpful and actionable.**
+* **Phase 3: Application Insights Integration**
+    * [ ] Create the `appinsights` client to make authenticated API calls.
+    * [ ] Implement a function to execute a basic KQL query that respects the configured fetch size.
+    * [ ] Create a view to display a list of log entries with default columns.
+    * [ ] **Implement dynamic parsing of `customDimensions` based on `eventId` for the details view.**
+    * [ ] Implement pagination logic to "load more" logs.
+    * [ ] **Handle API errors and loading states with clear, guiding messages.**
+* **Phase 4: Advanced Features**
+    * [ ] Implement a detailed view for a single log entry.
+    * [ ] **Implement a KQL editor for writing and editing custom queries.**
+    * [ ] **Add functionality to save a custom query with a name/description.**
+    * [ ] **Implement a query library view to load and run saved queries.**
+    * [ ] **Dynamically render table columns based on KQL `project` statements.**
+    * [ ] Add color-coding for different log levels.
+* **Phase 5: AI-Powered Querying**
+    * [ ] Integrate with an AI service (e.g., Azure OpenAI) in the `ai` package.
+    * [ ] Create a new TUI view/prompt for natural language input.
+    * [ ] Implement logic to send the user's prompt and receive a KQL query.
+    * [ ] Allow the user to review, accept, and run the generated query.
