@@ -5,7 +5,7 @@
 ### ⚠️ MANDATORY: Clean Build & Linting
 **BEFORE ANY CODE SUBMISSION OR RESPONSE**, you MUST run the complete linting suite and ensure a clean build:
 ```powershell
-go fmt ./...; go vet ./...; golangci-lint run --fast
+go fmt ./... && go vet ./... && golangci-lint run --fast
 ```
 
 **CRITICAL REQUIREMENTS:**

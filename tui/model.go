@@ -10,16 +10,24 @@ import (
 )
 
 type Model struct {
-	WelcomeMsg string
-	HelpText   string
-	Config     config.Config
+	WelcomeMsg     string
+	HelpText       string
+	Config         config.Config
+	CommandPalette bool   // Command palette is open
+	WindowWidth    int    // Terminal width
+	WindowHeight   int    // Terminal height
+	CommandInput   string // Current command input
 }
 
 func InitialModel(cfg config.Config) Model {
 	return Model{
-		WelcomeMsg: "Welcome to bc-insights-tui!",
-		HelpText:   fmt.Sprintf("Press q to quit. Log fetch size: %d", cfg.LogFetchSize),
-		Config:     cfg,
+		WelcomeMsg:     "Welcome to bc-insights-tui!",
+		HelpText:       fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", cfg.LogFetchSize),
+		Config:         cfg,
+		CommandPalette: false,
+		WindowWidth:    80, // Default width
+		WindowHeight:   24, // Default height
+		CommandInput:   "",
 	}
 }
 
