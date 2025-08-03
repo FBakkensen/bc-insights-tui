@@ -88,7 +88,7 @@ func TestUpdate_CommandPaletteBackspace(t *testing.T) {
 	cfg := config.Config{LogFetchSize: 50}
 	model := InitialModel(cfg)
 	model.CommandPalette = true
-	model.CommandInput = "test"
+	model.CommandInput = testCommandInput
 
 	// Test backspace
 	keyMsg := tea.KeyMsg{Type: tea.KeyBackspace}
