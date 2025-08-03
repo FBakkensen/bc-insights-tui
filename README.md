@@ -2,6 +2,27 @@
 
 A Terminal User Interface for Azure Application Insights, specifically designed for Microsoft Dynamics 365 Business Central developers. Built with Go and the Charm Bracelet TUI ecosystem.
 
+## 🚀 Quick Start
+
+### 1. Clone and Setup
+```bash
+git clone https://github.com/FBakkensen/bc-insights-tui.git
+cd bc-insights-tui
+
+# Install Git hooks (prevents commits to main branch)
+./install-hooks.sh          # Unix/Linux/macOS
+# OR
+.\install-hooks.ps1         # Windows PowerShell
+```
+
+### 2. Build and Run
+```bash
+go build
+./bc-insights-tui           # Unix/Linux/macOS
+# OR
+.\bc-insights-tui.exe       # Windows
+```
+
 ## 🎯 Project Overview
 
 BC Insights TUI provides a keyboard-driven, command palette-based interface for querying and analyzing Business Central telemetry data stored in Azure Application Insights. The tool is optimized for the dynamic nature of Business Central's telemetry schema, where event structure is determined by the `eventId` field.
