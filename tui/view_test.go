@@ -181,7 +181,7 @@ func TestView_WindowSizeVariations(t *testing.T) {
 
 			// Test command palette works with different sizes
 			model.CommandPalette = true
-			model.CommandInput = "test"
+			model.CommandInput = testCommandInput
 			output = model.View()
 
 			// Command palette should appear in overlay regardless of size
@@ -189,7 +189,7 @@ func TestView_WindowSizeVariations(t *testing.T) {
 				t.Errorf("Expected command palette in output for %s when palette is open", tc.name)
 			}
 
-			if !strings.Contains(output, "> test") {
+			if !strings.Contains(output, "> "+testCommandInput) {
 				t.Errorf("Expected command input in palette for %s", tc.name)
 			}
 		})
@@ -205,7 +205,7 @@ func TestView_ConsistentStructure(t *testing.T) {
 
 	// Test with command palette
 	model.CommandPalette = true
-	model.CommandInput = "test"
+	model.CommandInput = testCommandInput
 	output2 := model.View()
 
 	// Both outputs should contain the basic elements
@@ -230,7 +230,7 @@ func TestView_ConsistentStructure(t *testing.T) {
 	paletteElements := []string{
 		"╔════",
 		"Press Esc to close, Enter to execute",
-		"> test",
+		"> " + testCommandInput,
 	}
 
 	for _, element := range paletteElements {

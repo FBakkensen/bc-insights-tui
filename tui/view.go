@@ -57,7 +57,7 @@ func (m Model) View() string {
 	// Build header content
 	headerLeft := fmt.Sprintf("bc-insights-tui %s", AppVersion)
 	headerRight := "Welcome - Business Central Developer Tools"
-	headerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(headerLeft)-len(headerRight)-4))
+	headerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(headerLeft)-len(headerRight)-7))
 	header := headerStyle.Render(headerLeft + " | " + headerRight + headerSpacer)
 
 	// Build main content
@@ -100,7 +100,7 @@ func (m Model) View() string {
 	// Build footer content
 	footerLeft := "[Ctrl+P] Open Command Palette | [Ctrl+C] Quit"
 	footerRight := fmt.Sprintf("Terminal: %dx%d", m.WindowWidth, m.WindowHeight)
-	footerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(footerLeft)-len(footerRight)-2))
+	footerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(footerLeft)-len(footerRight)-4))
 	footer := footerStyle.Render(footerLeft + footerSpacer + footerRight)
 
 	// Combine all parts for full screen layout
