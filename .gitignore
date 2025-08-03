@@ -7,6 +7,9 @@
 bc-insights-tui
 bc-insights-tui.exe
 
+# Linting tools (should be installed via CI or locally, not committed)
+golangci-lint
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -99,11 +102,6 @@ out/
 # Documentation generated files
 docs/_site/
 docs/.jekyll-cache/
-
-# Project specific test files
-config_test.go
-*_test_temp.go
-test-*.go
 
 # Backup files
 *.bak
