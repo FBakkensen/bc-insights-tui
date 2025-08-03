@@ -15,8 +15,14 @@ func TestMain_ConfigurationToTUIFlow(t *testing.T) {
 	// Test the end-to-end flow from config loading to TUI initialization
 
 	// Set test environment
-	os.Setenv("LOG_FETCH_SIZE", "123")
-	defer os.Unsetenv("LOG_FETCH_SIZE")
+	if err := os.Setenv("LOG_FETCH_SIZE", "123"); err != nil {
+		t.Fatalf("Failed to set environment variable: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
+			t.Logf("Failed to unset environment variable: %v", err)
+		}
+	}()
 
 	// Load config
 	cfg := config.LoadConfig()
@@ -102,10 +108,18 @@ func TestMain_ConfigurationVariations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Set up environment
 			if tc.envVar != "" {
-				os.Setenv("LOG_FETCH_SIZE", tc.envVar)
-				defer os.Unsetenv("LOG_FETCH_SIZE")
+				if err := os.Setenv("LOG_FETCH_SIZE", tc.envVar); err != nil {
+					t.Fatalf("Failed to set environment variable: %v", err)
+				}
+				defer func() {
+					if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
+						t.Logf("Failed to unset environment variable: %v", err)
+					}
+				}()
 			} else {
-				os.Unsetenv("LOG_FETCH_SIZE")
+				if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
+					t.Logf("Failed to unset environment variable: %v", err)
+				}
 			}
 
 			// Test full flow
@@ -181,7 +195,11 @@ func TestMain_ExecutableBuild(t *testing.T) {
 	}
 
 	// Clean up
-	defer os.Remove(execPath)
+	defer func() {
+		if err := os.Remove(execPath); err != nil {
+			t.Logf("Failed to remove test executable: %v", err)
+		}
+	}()
 }
 
 func TestMain_ExecutableRun(t *testing.T) {
@@ -195,7 +213,11 @@ func TestMain_ExecutableRun(t *testing.T) {
 	if err := buildCmd.Run(); err != nil {
 		t.Fatalf("Failed to build executable for testing: %v", err)
 	}
-	defer os.Remove("/tmp/bc-insights-tui-test")
+	defer func() {
+		if err := os.Remove("/tmp/bc-insights-tui-test"); err != nil {
+			t.Logf("Failed to remove test executable: %v", err)
+		}
+	}()
 
 	// Run the executable with a timeout and quit command
 	runCmd := exec.Command("/tmp/bc-insights-tui-test")
@@ -212,7 +234,10 @@ func TestMain_ExecutableRun(t *testing.T) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		if runCmd.Process != nil {
-			runCmd.Process.Signal(os.Interrupt)
+			if err := runCmd.Process.Signal(os.Interrupt); err != nil {
+				// Process might have already exited, this is expected and not an error
+				_ = err
+			}
 		}
 	}()
 
@@ -232,7 +257,9 @@ func TestMain_ExecutableRun(t *testing.T) {
 	case <-timeout:
 		// Kill the process if it's still running
 		if runCmd.Process != nil {
-			runCmd.Process.Kill()
+			if err := runCmd.Process.Kill(); err != nil {
+				t.Logf("Failed to kill process: %v", err)
+			}
 		}
 		t.Error("Executable did not exit within timeout")
 	}
@@ -277,8 +304,7 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
-	return strings.Contains(s, substr)
-}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
@@ -300,3 +326,4 @@ func itoa(n int) string {
 	}
 
 	return string(digits)
+}
