@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Config holds application settings
@@ -34,14 +35,14 @@ func LoadConfigWithArgs(args []string) Config {
 	flagSet.Usage = func() {} // Suppress usage output during tests
 
 	var (
-		fetchSizeFlag   = flagSet.Int("fetch-size", 0, "Number of log entries to fetch per request")
-		environmentFlag = flagSet.String("environment", "", "Environment name (e.g., Development, Production)")
-		appInsightsFlag = flagSet.String("app-insights-key", "", "Application Insights connection string")
+		fetchSizeFlag   = flagSet.Int("fetch-size", -1, "Number of log entries to fetch per request")
+		environmentFlag = flagSet.String("environment", "\x00", "Environment name (e.g., Development, Production)")
+		appInsightsFlag = flagSet.String("app-insights-key", "\x00", "Application Insights connection string")
 		configFileFlag  = flagSet.String("config", "", "Path to configuration file (JSON)")
 	)
 
 	// Parse arguments, ignoring errors (for compatibility)
-	flagSet.Parse(args)
+	_ = flagSet.Parse(args)
 
 	// Start with default values
 	cfg := Config{
@@ -69,22 +70,25 @@ func LoadConfigWithArgs(args []string) Config {
 			cfg.LogFetchSize = parsed
 		}
 	}
-	if val := os.Getenv("BCINSIGHTS_ENVIRONMENT"); val != "" {
-		cfg.Environment = val
+	if _, exists := os.LookupEnv("BCINSIGHTS_ENVIRONMENT"); exists {
+		cfg.Environment = os.Getenv("BCINSIGHTS_ENVIRONMENT") // Allow empty string
 	}
-	if val := os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY"); val != "" {
-		cfg.ApplicationInsightsKey = val
+	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
+		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
 	}
 
 	// Override with command line flags (highest priority)
-	if *fetchSizeFlag > 0 {
-		cfg.LogFetchSize = *fetchSizeFlag
+	// Use sentinel values to detect if flags were explicitly set
+	if *fetchSizeFlag != -1 { // -1 means not set
+		if *fetchSizeFlag > 0 { // Only override if positive
+			cfg.LogFetchSize = *fetchSizeFlag
+		}
 	}
-	if *environmentFlag != "" {
-		cfg.Environment = *environmentFlag
+	if *environmentFlag != "\x00" { // \x00 means not set
+		cfg.Environment = *environmentFlag // Allow empty string to override
 	}
-	if *appInsightsFlag != "" {
-		cfg.ApplicationInsightsKey = *appInsightsFlag
+	if *appInsightsFlag != "\x00" { // \x00 means not set
+		cfg.ApplicationInsightsKey = *appInsightsFlag // Allow empty string to override
 	}
 
 	return cfg
@@ -130,8 +134,8 @@ func loadConfigFromFile(filename string) (*Config, error) {
 	return &cfg, nil
 }
 
-// mergeConfig merges file configuration into the base config
-func mergeConfig(base *Config, file *Config) {
+// mergeConfig merges file configuration into the base config.
+func mergeConfig(base, file *Config) {
 	if file.LogFetchSize > 0 {
 		base.LogFetchSize = file.LogFetchSize
 	}
@@ -147,16 +151,20 @@ func mergeConfig(base *Config, file *Config) {
 func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 	switch name {
 	case "fetchSize":
-		if parsed, err := strconv.Atoi(value); err != nil || parsed <= 0 {
+		// Trim whitespace for parsing
+		trimmed := strings.TrimSpace(value)
+		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
 			return fmt.Errorf("fetchSize must be a positive integer, got: %s", value)
 		} else {
 			c.LogFetchSize = parsed
 		}
 	case "environment":
-		if value == "" {
+		// Trim whitespace and check if empty (but preserve original value if valid)
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
 			return fmt.Errorf("environment cannot be empty")
 		}
-		c.Environment = value
+		c.Environment = value // Use original value, not trimmed
 	case "applicationInsightsKey":
 		// Allow empty for clearing the key
 		c.ApplicationInsightsKey = value

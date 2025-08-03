@@ -14,6 +14,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	testPersistentEnv = "Persistent"
+)
+
 func TestMain_ConfigurationToTUIFlow(t *testing.T) {
 	// Test the end-to-end flow from config loading to TUI initialization
 
@@ -295,7 +299,7 @@ func TestMain_ConfigFileToUI(t *testing.T) {
 		"fetchSize": 333,
 		"environment": "IntegrationTestEnv"
 	}`
-	err := os.WriteFile(configFile, []byte(configContent), 0644)
+	err := os.WriteFile(configFile, []byte(configContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
@@ -334,7 +338,7 @@ func TestMain_CommandLineFlagsToUI(t *testing.T) {
 		"fetchSize": 100,
 		"environment": "FileEnv"
 	}`
-	err := os.WriteFile(configFile, []byte(configContent), 0644)
+	err := os.WriteFile(configFile, []byte(configContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
@@ -392,8 +396,8 @@ func TestMain_SetCommandEndToEnd(t *testing.T) {
 	// Type set command
 	for _, char := range "set fetchSize=555" {
 		keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{char}}
-		newModel, _ := model.Update(keyMsg)
-		model = newModel.(tui.Model)
+		updatedModel, _ := model.Update(keyMsg)
+		model = updatedModel.(tui.Model)
 	}
 
 	if model.CommandInput != "set fetchSize=555" {
@@ -438,14 +442,14 @@ func TestMain_ConfigPersistence(t *testing.T) {
 
 	// Update config via set command
 	model.CommandPalette = true
-	model.CommandInput = "set environment=Persistent"
+	model.CommandInput = "set environment=" + testPersistentEnv
 	enterKey := tea.KeyMsg{Type: tea.KeyEnter}
 	newModel, _ := model.Update(enterKey)
 	model = newModel.(tui.Model)
 
 	// Verify change persisted
-	if model.Config.Environment != "Persistent" {
-		t.Errorf("Expected environment to persist as 'Persistent', got %q", model.Config.Environment)
+	if model.Config.Environment != testPersistentEnv {
+		t.Errorf("Expected environment to persist as '%s', got %q", testPersistentEnv, model.Config.Environment)
 	}
 
 	// Simulate terminal resize (common UI event)
@@ -454,7 +458,7 @@ func TestMain_ConfigPersistence(t *testing.T) {
 	model = newModel.(tui.Model)
 
 	// Verify config still persisted after other events
-	if model.Config.Environment != "Persistent" {
+	if model.Config.Environment != testPersistentEnv {
 		t.Error("Expected config to persist after terminal resize")
 	}
 
@@ -465,7 +469,7 @@ func TestMain_ConfigPersistence(t *testing.T) {
 	model = newModel.(tui.Model)
 
 	// Verify both changes persist
-	if model.Config.Environment != "Persistent" {
+	if model.Config.Environment != testPersistentEnv {
 		t.Error("Expected first config change to persist after second change")
 	}
 	if model.Config.LogFetchSize != 777 {
@@ -477,7 +481,7 @@ func TestMain_ConfigPersistence(t *testing.T) {
 	if !strings.Contains(view, "Log fetch size: 777") {
 		t.Error("Expected UI to show persisted fetch size")
 	}
-	if !strings.Contains(view, "Environment: Persistent") {
+	if !strings.Contains(view, "Environment: "+testPersistentEnv) {
 		t.Error("Expected UI to show persisted environment")
 	}
 }
@@ -493,7 +497,7 @@ func TestMain_MultipleConfigSources(t *testing.T) {
 		"environment": "FileEnvironment",
 		"applicationInsightsKey": "file-key-123456789"
 	}`
-	err := os.WriteFile(configFile, []byte(configContent), 0644)
+	err := os.WriteFile(configFile, []byte(configContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}

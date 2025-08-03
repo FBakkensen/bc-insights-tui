@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+const (
+	testFlagEnv = "FlagEnv"
+	testEnvKey  = "env-key"
+)
+
 func TestLoadConfig_DefaultValues(t *testing.T) {
 	// Ensure environment is clean
 	if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
@@ -167,7 +172,7 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 		{
 			name:    "app-insights-key flag overrides env",
 			args:    []string{"--app-insights-key=flag-key"},
-			envVars: map[string]string{"BCINSIGHTS_APP_INSIGHTS_KEY": "env-key"},
+			envVars: map[string]string{"BCINSIGHTS_APP_INSIGHTS_KEY": testEnvKey},
 			expected: Config{
 				LogFetchSize:           50,
 				Environment:            "Development",
@@ -180,7 +185,7 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 			envVars: map[string]string{
 				"LOG_FETCH_SIZE":              "100",
 				"BCINSIGHTS_ENVIRONMENT":      "Production",
-				"BCINSIGHTS_APP_INSIGHTS_KEY": "env-key",
+				"BCINSIGHTS_APP_INSIGHTS_KEY": testEnvKey,
 			},
 			expected: Config{
 				LogFetchSize:           300,
@@ -266,7 +271,7 @@ func TestLoadConfig_ConfigFileLoading(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create test config file
 			configPath := filepath.Join(tempDir, tc.fileName)
-			err := os.WriteFile(configPath, []byte(tc.fileContent), 0644)
+			err := os.WriteFile(configPath, []byte(tc.fileContent), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test config file: %v", err)
 			}
@@ -329,7 +334,7 @@ func TestLoadConfig_ConfigFileLocations(t *testing.T) {
 
 			// Create test files
 			for filename, content := range tc.setupFiles {
-				err := os.WriteFile(filename, []byte(content), 0644)
+				err := os.WriteFile(filename, []byte(content), 0o644)
 				if err != nil {
 					t.Fatalf("Failed to create test file %s: %v", filename, err)
 				}
@@ -356,7 +361,7 @@ func TestLoadConfig_PriorityOrder(t *testing.T) {
 		"environment": "FileEnv",
 		"applicationInsightsKey": "file-key"
 	}`
-	err := os.WriteFile(configFile, []byte(fileContent), 0644)
+	err := os.WriteFile(configFile, []byte(fileContent), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
@@ -364,7 +369,7 @@ func TestLoadConfig_PriorityOrder(t *testing.T) {
 	// Set environment variables
 	os.Setenv("LOG_FETCH_SIZE", "200")
 	os.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", "env-key")
+	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKey)
 	defer func() {
 		os.Unsetenv("LOG_FETCH_SIZE")
 		os.Unsetenv("BCINSIGHTS_ENVIRONMENT")
@@ -375,7 +380,7 @@ func TestLoadConfig_PriorityOrder(t *testing.T) {
 	cfg := LoadConfigWithArgs([]string{
 		"--config=" + configFile,
 		"--fetch-size=300",
-		"--environment=FlagEnv",
+		"--environment=" + testFlagEnv,
 		// Note: not setting app-insights-key flag to test env wins over file
 	})
 
@@ -383,11 +388,11 @@ func TestLoadConfig_PriorityOrder(t *testing.T) {
 	if cfg.LogFetchSize != 300 {
 		t.Errorf("Expected flags to override env and file for LogFetchSize, got %d", cfg.LogFetchSize)
 	}
-	if cfg.Environment != "FlagEnv" {
+	if cfg.Environment != testFlagEnv {
 		t.Errorf("Expected flags to override env and file for Environment, got %q", cfg.Environment)
 	}
 	// Env should win over file for applicationInsightsKey (no flag set)
-	if cfg.ApplicationInsightsKey != "env-key" {
+	if cfg.ApplicationInsightsKey != testEnvKey {
 		t.Errorf("Expected env to override file for ApplicationInsightsKey, got %q", cfg.ApplicationInsightsKey)
 	}
 }
@@ -526,7 +531,7 @@ func TestConfig_JSONYAMLRoundtrip(t *testing.T) {
 
 		// Write config to file
 		jsonData, _ := json.MarshalIndent(originalCfg, "", "  ")
-		err := os.WriteFile(configFile, jsonData, 0644)
+		err := os.WriteFile(configFile, jsonData, 0o644)
 		if err != nil {
 			t.Fatalf("Failed to write config file: %v", err)
 		}

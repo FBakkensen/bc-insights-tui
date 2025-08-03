@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+const (
+	testEnvKeyPrecedence = "env-key"
+)
+
 // Test priority order between config sources: flags > env > file > defaults
 
 func TestPrecedence_DefaultsOnly(t *testing.T) {
@@ -50,7 +54,7 @@ func TestPrecedence_FileOverridesDefaults(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Ensure clean environment
 	os.Unsetenv("LOG_FETCH_SIZE")
@@ -83,12 +87,12 @@ func TestPrecedence_EnvOverridesFileAndDefaults(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set environment variables with different values
 	os.Setenv("LOG_FETCH_SIZE", "222")
 	os.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", "env-key")
+	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKeyPrecedence)
 	defer func() {
 		os.Unsetenv("LOG_FETCH_SIZE")
 		os.Unsetenv("BCINSIGHTS_ENVIRONMENT")
@@ -104,8 +108,8 @@ func TestPrecedence_EnvOverridesFileAndDefaults(t *testing.T) {
 	if cfg.Environment != "EnvEnvironment" {
 		t.Errorf("Expected env Environment 'EnvEnvironment', got %q", cfg.Environment)
 	}
-	if cfg.ApplicationInsightsKey != "env-key" {
-		t.Errorf("Expected env ApplicationInsightsKey 'env-key', got %q", cfg.ApplicationInsightsKey)
+	if cfg.ApplicationInsightsKey != testEnvKeyPrecedence {
+		t.Errorf("Expected env ApplicationInsightsKey '%s', got %q", testEnvKeyPrecedence, cfg.ApplicationInsightsKey)
 	}
 }
 
@@ -121,12 +125,12 @@ func TestPrecedence_FlagsOverrideAll(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set environment variables
 	os.Setenv("LOG_FETCH_SIZE", "222")
 	os.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", "env-key")
+	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKeyPrecedence)
 	defer func() {
 		os.Unsetenv("LOG_FETCH_SIZE")
 		os.Unsetenv("BCINSIGHTS_ENVIRONMENT")
@@ -165,11 +169,11 @@ func TestPrecedence_PartialOverrides(t *testing.T) {
 		// ApplicationInsightsKey not set in file
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set only some environment variables
 	os.Setenv("LOG_FETCH_SIZE", "222")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", "env-key")
+	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKeyPrecedence)
 	// BCINSIGHTS_ENVIRONMENT not set
 	defer func() {
 		os.Unsetenv("LOG_FETCH_SIZE")
@@ -193,7 +197,7 @@ func TestPrecedence_PartialOverrides(t *testing.T) {
 	if cfg.Environment != "FlagEnv" {
 		t.Errorf("Expected flag to win for Environment, got %q", cfg.Environment)
 	}
-	if cfg.ApplicationInsightsKey != "env-key" {
+	if cfg.ApplicationInsightsKey != testEnvKeyPrecedence {
 		t.Errorf("Expected env to win for ApplicationInsightsKey, got %q", cfg.ApplicationInsightsKey)
 	}
 }
@@ -210,7 +214,7 @@ func TestPrecedence_InvalidEnvVarsFallback(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set invalid environment variables
 	os.Setenv("LOG_FETCH_SIZE", "invalid-not-a-number")
@@ -251,12 +255,12 @@ func TestPrecedence_ZeroValueFlags(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set environment variables
 	os.Setenv("LOG_FETCH_SIZE", "222")
 	os.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", "env-key")
+	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKeyPrecedence)
 	defer func() {
 		os.Unsetenv("LOG_FETCH_SIZE")
 		os.Unsetenv("BCINSIGHTS_ENVIRONMENT")
@@ -281,7 +285,7 @@ func TestPrecedence_ZeroValueFlags(t *testing.T) {
 	if cfg.Environment != "" {
 		t.Errorf("Expected empty flag to override env Environment, got %q", cfg.Environment)
 	}
-	if cfg.ApplicationInsightsKey != "env-key" {
+	if cfg.ApplicationInsightsKey != testEnvKeyPrecedence {
 		t.Errorf("Expected env ApplicationInsightsKey when no flag set, got %q", cfg.ApplicationInsightsKey)
 	}
 }
@@ -301,7 +305,7 @@ func TestPrecedence_MultipleConfigFiles(t *testing.T) {
 		ApplicationInsightsKey: "auto-key",
 	}
 	autoJsonData, _ := json.Marshal(autoConfig)
-	os.WriteFile(autoConfigFile, autoJsonData, 0644)
+	os.WriteFile(autoConfigFile, autoJsonData, 0o644)
 	defer os.Remove(autoConfigFile)
 
 	// Create explicit config file
@@ -312,7 +316,7 @@ func TestPrecedence_MultipleConfigFiles(t *testing.T) {
 		ApplicationInsightsKey: "explicit-key",
 	}
 	explicitJsonData, _ := json.Marshal(explicitConfig)
-	os.WriteFile(explicitConfigFile, explicitJsonData, 0644)
+	os.WriteFile(explicitConfigFile, explicitJsonData, 0o644)
 
 	// Test explicit config file takes precedence over auto-discovered
 	cfg := LoadConfigWithArgs([]string{"--config=" + explicitConfigFile})
@@ -355,7 +359,7 @@ func TestPrecedence_ComplexScenario(t *testing.T) {
 		ApplicationInsightsKey: "file-key-123456789",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0644)
+	os.WriteFile(configFile, jsonData, 0o644)
 
 	// Set environment variables for some values
 	os.Setenv("LOG_FETCH_SIZE", "200")

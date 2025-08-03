@@ -55,7 +55,7 @@ func TestFindConfigFile_CurrentDirectory(t *testing.T) {
 
 			// Create test files
 			for _, filename := range tc.createFiles {
-				err := os.WriteFile(filename, []byte(`{"fetchSize": 1}`), 0644)
+				err := os.WriteFile(filename, []byte(`{"fetchSize": 1}`), 0o644)
 				if err != nil {
 					t.Fatalf("Failed to create test file %s: %v", filename, err)
 				}
@@ -83,11 +83,11 @@ func TestFindConfigFile_HomeDirectory(t *testing.T) {
 	configDir := filepath.Join(homeDir, ".bc-insights-tui")
 	workingDir := filepath.Join(tempDir, "working")
 
-	err = os.MkdirAll(configDir, 0755)
+	err = os.MkdirAll(configDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create config directory: %v", err)
 	}
-	err = os.MkdirAll(workingDir, 0755)
+	err = os.MkdirAll(workingDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create working directory: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestFindConfigFile_HomeDirectory(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create test file
-			err := os.WriteFile(tc.createFile, []byte(`{"fetchSize": 1}`), 0644)
+			err := os.WriteFile(tc.createFile, []byte(`{"fetchSize": 1}`), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file %s: %v", tc.createFile, err)
 			}
@@ -198,7 +198,7 @@ func TestLoadConfigFromFile_ValidFiles(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			filename := filepath.Join(tempDir, tc.name+".json")
-			err := os.WriteFile(filename, []byte(tc.content), 0644)
+			err := os.WriteFile(filename, []byte(tc.content), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
@@ -258,7 +258,7 @@ func TestLoadConfigFromFile_InvalidFiles(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			filename := filepath.Join(tempDir, tc.name+".json")
-			err := os.WriteFile(filename, []byte(tc.content), 0644)
+			err := os.WriteFile(filename, []byte(tc.content), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
@@ -391,7 +391,7 @@ func TestConfigFileIntegration(t *testing.T) {
 		t.Fatalf("Failed to marshal config: %v", err)
 	}
 
-	err = os.WriteFile(configFile, jsonData, 0644)
+	err = os.WriteFile(configFile, jsonData, 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
