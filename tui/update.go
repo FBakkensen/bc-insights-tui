@@ -2,7 +2,12 @@ package tui
 
 // Update logic for Bubble Tea TUI
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -16,9 +21,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.CommandInput = ""
 				return m, nil
 			case "enter":
-				// Process command (placeholder for future implementation)
+				// Process command
 				m.CommandPalette = false
+				cmd := strings.TrimSpace(m.CommandInput)
 				m.CommandInput = ""
+
+				// Process the command
+				if cmd == "" {
+					return m, nil
+				}
+
+				m.processCommand(cmd)
 				return m, nil
 			case "backspace":
 				// Remove last character from command input
@@ -59,4 +72,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// processCommand handles command execution from the command palette
+func (m *Model) processCommand(cmd string) {
+	// Clear previous feedback
+	m.FeedbackMessage = ""
+	m.FeedbackIsError = false
+
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return
+	}
+
+	switch parts[0] {
+	case "set":
+		m.handleSetCommand(parts[1:])
+	default:
+		m.FeedbackMessage = fmt.Sprintf("Unknown command: %s", parts[0])
+		m.FeedbackIsError = true
+	}
+}
+
+// handleSetCommand processes the "set" command
+func (m *Model) handleSetCommand(args []string) {
+	if len(args) == 0 {
+		// List all settings
+		settings := m.Config.ListAllSettings()
+		var settingsList []string
+		for name, value := range settings {
+			settingsList = append(settingsList, fmt.Sprintf("%s=%s", name, value))
+		}
+		m.FeedbackMessage = fmt.Sprintf("Current settings: %s", strings.Join(settingsList, ", "))
+		return
+	}
+
+	// Parse setting=value format
+	arg := strings.Join(args, " ")
+	parts := strings.SplitN(arg, "=", 2)
+	if len(parts) != 2 {
+		m.FeedbackMessage = "Usage: set <setting>=<value> or just 'set' to list all settings"
+		m.FeedbackIsError = true
+		return
+	}
+
+	setting := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+
+	if err := m.Config.ValidateAndUpdateSetting(setting, value); err != nil {
+		m.FeedbackMessage = err.Error()
+		m.FeedbackIsError = true
+		return
+	}
+
+	// Success feedback
+	m.FeedbackMessage = fmt.Sprintf("✓ %s set to: %s", setting, value)
+
+	// Update help text if LogFetchSize changed
+	if setting == "fetchSize" {
+		m.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", m.Config.LogFetchSize)
+	}
 }

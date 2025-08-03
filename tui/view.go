@@ -93,6 +93,33 @@ func (m Model) View() string {
 	content.WriteString("\n")
 	content.WriteString(fmt.Sprintf(bulletStyle.Render("• Log fetch size: %d entries per request"), m.Config.LogFetchSize))
 	content.WriteString("\n")
+	content.WriteString(fmt.Sprintf(bulletStyle.Render("• Environment: %s"), m.Config.Environment))
+	content.WriteString("\n")
+	if m.Config.ApplicationInsightsKey == "" {
+		content.WriteString(bulletStyle.Render("• Application Insights Key: (not set)"))
+	} else {
+		masked := m.Config.ApplicationInsightsKey
+		if len(masked) > 8 {
+			masked = masked[:4] + "..." + masked[len(masked)-4:]
+		} else {
+			masked = "***"
+		}
+		content.WriteString(fmt.Sprintf(bulletStyle.Render("• Application Insights Key: %s"), masked))
+	}
+	content.WriteString("\n")
+
+	// Command feedback section
+	if m.FeedbackMessage != "" {
+		content.WriteString("\n")
+		if m.FeedbackIsError {
+			errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+			content.WriteString(errorStyle.Render("❌ " + m.FeedbackMessage))
+		} else {
+			successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+			content.WriteString(successStyle.Render(m.FeedbackMessage))
+		}
+		content.WriteString("\n")
+	}
 
 	// Apply content styling
 	mainContent := contentStyle.Render(content.String())
@@ -128,6 +155,7 @@ func (m Model) View() string {
 		var paletteContent strings.Builder
 		paletteContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("226")).Render("Command Palette"))
 		paletteContent.WriteString("\n")
+		paletteContent.WriteString("Examples: 'set' to list settings, 'set fetchSize=100'\n")
 		paletteContent.WriteString("Press Esc to close, Enter to execute\n\n")
 		paletteContent.WriteString("> " + m.CommandInput)
 
