@@ -277,7 +277,8 @@ func stringContains(s, substr string) bool {
 	}
 	return false
 }
-
+	return strings.Contains(s, substr)
+}
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
