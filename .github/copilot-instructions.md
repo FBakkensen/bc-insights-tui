@@ -15,6 +15,8 @@ go fmt ./... && go vet ./... && golangci-lint run --fast
 
 **Linting Configuration**: `.golangci.yml` includes strict rules with exceptions for TUI patterns (disabled `fieldalignment` for TUI models, allows embedding in TUI components).
 
+**Environment Setup**: `.github/workflows/copilot-setup-steps.yml` configures the Copilot coding agent environment with golangci-lint and Go dependencies pre-installed.
+
 ### ⚠️ MANDATORY: Documentation Research
 **BEFORE implementing any feature or fixing configuration issues**, you MUST use Context7 MCP to get up-to-date documentation:
 ```
