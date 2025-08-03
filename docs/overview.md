@@ -93,10 +93,10 @@ bc-insights-tui/
 Development will proceed in phases to ensure a solid foundation and iterative progress.
 
 * **Phase 1: Basic TUI Skeleton & Config**
-    * [ ] Set up the project structure and Go modules.
-    * [ ] Create a basic Bubble Tea application that can be started and quit.
-    * [ ] Implement a simple view with a welcome message and help text.
-    * [ ] Implement basic configuration loading (e.g., for log fetch size).
+    * [x] Set up the project structure and Go modules.
+    * [x] Create a basic Bubble Tea application that can be started and quit.
+    * [x] Implement a simple view with a welcome message and help text.
+    * [x] Implement basic configuration loading (e.g., for log fetch size).
 * **Phase 2: Authentication**
     * [ ] Implement the OAuth2 Device Authorization Flow.
     * [ ] Create a "Login" view in the TUI.
