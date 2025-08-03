@@ -3,24 +3,263 @@ package config
 // Application configuration logic
 
 import (
+	"encoding/json"
+	"flag"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
+)
+
+const (
+	// Flag names
+	flagEnvironment = "environment"
+	flagFetchSize   = "fetch-size"
+	flagAppInsights = "app-insights-key"
 )
 
 // Config holds application settings
 type Config struct {
-	LogFetchSize int
+	LogFetchSize           int    `json:"fetchSize" yaml:"fetchSize"`
+	Environment            string `json:"environment" yaml:"environment"`
+	ApplicationInsightsKey string `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
 }
 
-// LoadConfig loads configuration from environment variables
+// LoadConfig loads configuration from multiple sources in priority order:
+// 1. Command line flags (highest priority)
+// 2. Environment variables
+// 3. Configuration files (JSON)
+// 4. Default values (lowest priority)
 func LoadConfig() Config {
-	// Default fetch size
-	fetchSize := 50
+	return LoadConfigWithArgs(os.Args[1:])
+}
+
+// LoadConfigWithArgs loads configuration with the specified command line arguments
+func LoadConfigWithArgs(args []string) Config {
+	flagSet, flags := setupFlags()
+	_ = flagSet.Parse(args)
+
+	flagsSet := trackSetFlags(flagSet)
+
+	// Start with default values
+	cfg := Config{
+		LogFetchSize:           50,
+		Environment:            "Development",
+		ApplicationInsightsKey: "",
+	}
+
+	// Load from configuration file if specified or found
+	loadConfigFromFileIfExists(&cfg, *flags.configFile)
+
+	// Override with environment variables
+	applyEnvironmentVariables(&cfg)
+
+	// Override with command line flags (highest priority)
+	applyCommandLineFlags(&cfg, flags, flagsSet)
+
+	return cfg
+}
+
+// setupFlags creates and configures the flag set
+func setupFlags() (*flag.FlagSet, *flagValues) {
+	flagSet := flag.NewFlagSet("bc-insights-tui", flag.ContinueOnError)
+	flagSet.Usage = func() {} // Suppress usage output during tests
+
+	flags := &flagValues{
+		fetchSize:   flagSet.Int(flagFetchSize, -1, "Number of log entries to fetch per request"),
+		environment: flagSet.String(flagEnvironment, "", "Environment name (e.g., Development, Production)"),
+		appInsights: flagSet.String(flagAppInsights, "", "Application Insights connection string"),
+		configFile:  flagSet.String("config", "", "Path to configuration file (JSON)"),
+	}
+
+	return flagSet, flags
+}
+
+// flagValues holds pointers to flag values
+type flagValues struct {
+	fetchSize   *int
+	environment *string
+	appInsights *string
+	configFile  *string
+}
+
+// flagsSet tracks which flags were explicitly set
+type flagsSet struct {
+	fetchSize   bool
+	environment bool
+	appInsights bool
+}
+
+// trackSetFlags tracks which flags were explicitly set by the user
+func trackSetFlags(flagSet *flag.FlagSet) flagsSet {
+	var flags flagsSet
+	flagSet.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case flagFetchSize:
+			flags.fetchSize = true
+		case flagEnvironment:
+			flags.environment = true
+		case flagAppInsights:
+			flags.appInsights = true
+		}
+	})
+	return flags
+}
+
+// loadConfigFromFileIfExists loads configuration from file if it exists
+func loadConfigFromFileIfExists(cfg *Config, configFile string) {
+	if configFile == "" {
+		configFile = findConfigFile()
+	}
+	if configFile != "" {
+		if fileConfig, err := loadConfigFromFile(configFile); err == nil {
+			mergeConfig(cfg, fileConfig)
+		}
+		// Silently ignore file loading errors - not critical
+	}
+}
+
+// applyEnvironmentVariables applies environment variable overrides
+func applyEnvironmentVariables(cfg *Config) {
 	if val := os.Getenv("LOG_FETCH_SIZE"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
-			fetchSize = parsed
+			cfg.LogFetchSize = parsed
 		}
-		// If parsing fails or value is invalid, fallback to default
 	}
-	return Config{LogFetchSize: fetchSize}
+	if _, exists := os.LookupEnv("BCINSIGHTS_ENVIRONMENT"); exists {
+		cfg.Environment = os.Getenv("BCINSIGHTS_ENVIRONMENT") // Allow empty string
+	}
+	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
+		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
+	}
+}
+
+// applyCommandLineFlags applies command line flag overrides
+func applyCommandLineFlags(cfg *Config, flags *flagValues, flagsSet flagsSet) {
+	if flagsSet.fetchSize && *flags.fetchSize > 0 { // Only override if positive and explicitly set
+		cfg.LogFetchSize = *flags.fetchSize
+	}
+	if flagsSet.environment { // Allow empty string to override if flag was explicitly set
+		cfg.Environment = *flags.environment
+	}
+	if flagsSet.appInsights { // Allow empty string to override if flag was explicitly set
+		cfg.ApplicationInsightsKey = *flags.appInsights
+	}
+}
+
+// findConfigFile looks for configuration files in standard locations
+func findConfigFile() string {
+	// Check current directory first
+	candidates := []string{
+		"config.json",
+		"bc-insights-tui.json",
+	}
+
+	// Add home directory candidates
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".bc-insights-tui", "config.json"),
+			filepath.Join(homeDir, ".bc-insights-tui.json"),
+		)
+	}
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
+}
+
+// loadConfigFromFile loads configuration from a JSON file
+func loadConfigFromFile(filename string) (*Config, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// mergeConfig merges file configuration into the base config.
+func mergeConfig(base, file *Config) {
+	if file.LogFetchSize > 0 {
+		base.LogFetchSize = file.LogFetchSize
+	}
+	if file.Environment != "" {
+		base.Environment = file.Environment
+	}
+	if file.ApplicationInsightsKey != "" {
+		base.ApplicationInsightsKey = file.ApplicationInsightsKey
+	}
+}
+
+// ValidateAndUpdateSetting validates and updates a configuration setting
+func (c *Config) ValidateAndUpdateSetting(name, value string) error {
+	switch name {
+	case "fetchSize":
+		// Trim whitespace for parsing
+		trimmed := strings.TrimSpace(value)
+		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
+			return fmt.Errorf("fetchSize must be a positive integer, got: %s", value)
+		} else {
+			c.LogFetchSize = parsed
+		}
+	case "environment":
+		// Trim whitespace and check if empty (but preserve original value if valid)
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return fmt.Errorf("environment cannot be empty")
+		}
+		c.Environment = value // Use original value, not trimmed
+	case "applicationInsightsKey":
+		// Allow empty for clearing the key
+		c.ApplicationInsightsKey = value
+	default:
+		return fmt.Errorf("unknown setting: %s", name)
+	}
+	return nil
+}
+
+// GetSettingValue returns the current value of a setting as a string
+func (c *Config) GetSettingValue(name string) (string, error) {
+	switch name {
+	case "fetchSize":
+		return strconv.Itoa(c.LogFetchSize), nil
+	case "environment":
+		return c.Environment, nil
+	case "applicationInsightsKey":
+		if c.ApplicationInsightsKey == "" {
+			return "(not set)", nil
+		}
+		// Mask the key for display
+		if len(c.ApplicationInsightsKey) > 8 {
+			return c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:], nil
+		}
+		return "***", nil
+	default:
+		return "", fmt.Errorf("unknown setting: %s", name)
+	}
+}
+
+// ListAllSettings returns a map of all settings and their current values
+func (c *Config) ListAllSettings() map[string]string {
+	settings := make(map[string]string)
+	settings["fetchSize"] = strconv.Itoa(c.LogFetchSize)
+	settings["environment"] = c.Environment
+	if c.ApplicationInsightsKey == "" {
+		settings["applicationInsightsKey"] = "(not set)"
+	} else if len(c.ApplicationInsightsKey) > 8 {
+		settings["applicationInsightsKey"] = c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:]
+	} else {
+		settings["applicationInsightsKey"] = "***"
+	}
+	return settings
 }
