@@ -231,37 +231,27 @@ func TestMain_ExecutableRun(t *testing.T) {
 	// TUI apps typically hang in test environments without proper terminal
 	runCmd := exec.Command(execPath)
 
-	timeout := time.After(1 * time.Second) // Very short timeout
-	done := make(chan error, 1)
+	// Start the process
+	if err := runCmd.Start(); err != nil {
+		t.Fatalf("Failed to start executable: %v", err)
+	}
 
-	go func() {
-		done <- runCmd.Run()
-	}()
+	// Give it a moment to start
+	time.Sleep(100 * time.Millisecond)
 
-	// Immediately try to kill the process since TUI will hang in test environment
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		if runCmd.Process != nil {
-			// Kill immediately - TUI apps can't run properly in test environment
-			_ = runCmd.Process.Kill()
+	// Kill the process - TUI apps can't run properly in test environment
+	if runCmd.Process != nil {
+		if err := runCmd.Process.Kill(); err != nil {
+			t.Logf("Failed to kill process: %v", err)
 		}
-	}()
+	}
 
-	select {
-	case err := <-done:
-		// Process exited - this is fine, expected for TUI in test environment
-		if err != nil {
-			t.Logf("Executable exited with error (expected): %v", err)
-		} else {
-			t.Log("Executable exited cleanly")
-		}
-	case <-timeout:
-		// Timeout reached - kill process and consider test passed
-		// This is expected behavior for TUI applications in test environments
-		if runCmd.Process != nil {
-			_ = runCmd.Process.Kill()
-		}
-		t.Log("Executable started but hung (expected for TUI in test environment) - test passed")
+	// Wait for the process to complete
+	err := runCmd.Wait()
+	if err != nil {
+		t.Logf("Executable exited with error (expected): %v", err)
+	} else {
+		t.Log("Executable exited cleanly")
 	}
 
 	// The fact that we can build and start the executable is the main success criteria

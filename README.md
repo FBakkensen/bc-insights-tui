@@ -116,7 +116,7 @@ Example telemetry structure:
 **MANDATORY**: Before any code submission, run the complete linting suite:
 
 ```powershell
-go fmt ./...; go vet ./...; golangci-lint run --fast
+go fmt ./... && go vet ./... && golangci-lint run --fast
 ```
 
 **Requirements**:
