@@ -515,3 +515,195 @@ func TestView_ProfessionalStyling(t *testing.T) {
 		t.Errorf("Expected full-screen layout to have substantial content, got %d lines", len(lines))
 	}
 }
+
+// Additional view tests as requested in the issue
+
+func TestView_AllConfigurationDisplay(t *testing.T) {
+	cfg := config.Config{
+		LogFetchSize:           75,
+		Environment:            "ConfigTest",
+		ApplicationInsightsKey: "display-test-key",
+	}
+	model := InitialModel(cfg)
+
+	output := model.View()
+
+	// Test all configuration settings are displayed
+	expectedDisplays := []string{
+		"Log fetch size: 75",
+		"Environment: ConfigTest",
+		"Application Insights Key: disp...-key", // Should be masked - actual output shows "disp...-key"
+	}
+
+	for _, expected := range expectedDisplays {
+		if !strings.Contains(output, expected) {
+			t.Errorf("Expected configuration display to contain %q, got:\n%s", expected, output)
+		}
+	}
+}
+
+func TestView_ConfigurationFormatting(t *testing.T) {
+	testCases := []struct {
+		name     string
+		config   config.Config
+		expected []string
+	}{
+		{
+			name: "standard configuration",
+			config: config.Config{
+				LogFetchSize:           100,
+				Environment:            "Production",
+				ApplicationInsightsKey: "InstrumentationKey=abc123def456",
+			},
+			expected: []string{
+				"Log fetch size: 100",
+				"Environment: Production",
+				"Application Insights Key: Inst...f456", // Masked - actual output
+			},
+		},
+		{
+			name: "short key configuration",
+			config: config.Config{
+				LogFetchSize:           25,
+				Environment:            "Dev",
+				ApplicationInsightsKey: "short",
+			},
+			expected: []string{
+				"Log fetch size: 25",
+				"Environment: Dev",
+				"Application Insights Key: ***", // Short key masked
+			},
+		},
+		{
+			name: "empty key configuration",
+			config: config.Config{
+				LogFetchSize:           200,
+				Environment:            "Testing",
+				ApplicationInsightsKey: "",
+			},
+			expected: []string{
+				"Log fetch size: 200",
+				"Environment: Testing",
+				"Application Insights Key: (not set)", // Empty key
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := InitialModel(tc.config)
+			output := model.View()
+
+			for _, expected := range tc.expected {
+				if !strings.Contains(output, expected) {
+					t.Errorf("Expected output to contain %q, got:\n%s", expected, output)
+				}
+			}
+		})
+	}
+}
+
+func TestView_ConfigurationUpdates(t *testing.T) {
+	// Test that view updates when configuration changes
+	cfg := config.Config{LogFetchSize: 50, Environment: "Original"}
+	model := InitialModel(cfg)
+
+	// Get initial view
+	initialOutput := model.View()
+	if !strings.Contains(initialOutput, "Log fetch size: 50") {
+		t.Error("Expected initial view to show original fetch size")
+	}
+	if !strings.Contains(initialOutput, "Environment: Original") {
+		t.Error("Expected initial view to show original environment")
+	}
+
+	// Update configuration
+	model.Config.LogFetchSize = 150
+	model.Config.Environment = "Updated"
+	model.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", model.Config.LogFetchSize)
+
+	// Get updated view
+	updatedOutput := model.View()
+	if !strings.Contains(updatedOutput, "Log fetch size: 150") {
+		t.Error("Expected updated view to show new fetch size")
+	}
+	if !strings.Contains(updatedOutput, "Environment: Updated") {
+		t.Error("Expected updated view to show new environment")
+	}
+
+	// Ensure old values are not present
+	if strings.Contains(updatedOutput, "Log fetch size: 50") {
+		t.Error("Expected updated view to not show old fetch size")
+	}
+	if strings.Contains(updatedOutput, "Environment: Original") {
+		t.Error("Expected updated view to not show old environment")
+	}
+}
+
+func TestView_SetCommandFeedback(t *testing.T) {
+	cfg := config.Config{LogFetchSize: 50}
+	model := InitialModel(cfg)
+
+	testCases := []struct {
+		name             string
+		feedbackMessage  string
+		feedbackIsError  bool
+		shouldContain    string
+		shouldNotContain string
+	}{
+		{
+			name:            "success feedback",
+			feedbackMessage: "✓ fetchSize set to: 100",
+			feedbackIsError: false,
+			shouldContain:   "✓ fetchSize set to: 100",
+		},
+		{
+			name:            "error feedback",
+			feedbackMessage: "fetchSize must be a positive integer, got: -10",
+			feedbackIsError: true,
+			shouldContain:   "fetchSize must be a positive integer",
+		},
+		{
+			name:            "list settings feedback",
+			feedbackMessage: "Current settings: fetchSize=50, environment=Development, applicationInsightsKey=(not set)",
+			feedbackIsError: false,
+			shouldContain:   "Current settings:",
+		},
+		{
+			name:             "no feedback",
+			feedbackMessage:  "",
+			feedbackIsError:  false,
+			shouldNotContain: "✓",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set feedback on model
+			model.FeedbackMessage = tc.feedbackMessage
+			model.FeedbackIsError = tc.feedbackIsError
+
+			output := model.View()
+
+			if tc.shouldContain != "" {
+				if !strings.Contains(output, tc.shouldContain) {
+					t.Errorf("Expected output to contain %q, got:\n%s", tc.shouldContain, output)
+				}
+			}
+
+			if tc.shouldNotContain != "" {
+				if strings.Contains(output, tc.shouldNotContain) {
+					t.Errorf("Expected output to NOT contain %q, got:\n%s", tc.shouldNotContain, output)
+				}
+			}
+
+			// Test that error feedback is visually distinct (if there's error styling)
+			if tc.feedbackIsError && tc.feedbackMessage != "" {
+				// Error feedback should be present in output
+				if !strings.Contains(output, tc.feedbackMessage) {
+					t.Errorf("Expected error feedback %q to be visible in output", tc.feedbackMessage)
+				}
+			}
+		})
+	}
+}
