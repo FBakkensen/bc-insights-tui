@@ -78,6 +78,22 @@ cd bc-insights-tui
 go build
 ```
 
+### Available Make Commands
+
+The project includes a Makefile for standardized build commands that AI coding agents can easily recognize:
+
+```bash
+make help    # Show available commands
+make build   # Build the application
+make test    # Run tests
+make race    # Run tests with race detection
+make lint    # Run complete quality checks (fmt, vet, golangci-lint)
+make clean   # Clean build artifacts
+make all     # Run lint, race, and build (default)
+```
+
+**For AI Coding Agents**: Use these standardized commands for consistent build/test/lint operations across different development environments.
+
 ### Configuration
 
 The application uses environment variables with fallback defaults:
