@@ -83,9 +83,9 @@ func TestModel_Init(t *testing.T) {
 
 	cmd := model.Init()
 
-	// Init should return nil for this simple model
-	if cmd != nil {
-		t.Errorf("Expected Init() to return nil, got %v", cmd)
+	// Init should return authentication check command
+	if cmd == nil {
+		t.Error("Expected Init() to return authentication check command, got nil")
 	}
 }
 

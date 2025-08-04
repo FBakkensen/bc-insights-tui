@@ -5,6 +5,7 @@ package tui
 import (
 	"fmt"
 
+	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -21,6 +22,12 @@ type Model struct {
 	CommandInput    string // Current command input
 	FeedbackMessage string // Feedback from last command
 	FeedbackIsError bool   // Whether feedback is an error message
+
+	// Authentication state
+	AuthState     auth.AuthState
+	DeviceCode    *auth.DeviceCodeResponse
+	AuthError     error
+	Authenticator *auth.Authenticator
 }
 
 func InitialModel(cfg config.Config) Model {
@@ -34,10 +41,17 @@ func InitialModel(cfg config.Config) Model {
 		CommandInput:    "",
 		FeedbackMessage: "",
 		FeedbackIsError: false,
+
+		// Initialize authentication
+		AuthState:     auth.AuthStateUnknown,
+		DeviceCode:    nil,
+		AuthError:     nil,
+		Authenticator: auth.NewAuthenticator(cfg.OAuth2),
 	}
 }
 
 // Init implements tea.Model interface
 func (m Model) Init() tea.Cmd {
-	return nil
+	// Check authentication status on startup
+	return checkAuthStatus(m.Authenticator)
 }

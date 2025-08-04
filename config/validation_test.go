@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+// equalStringSlices compares two string slices for equality
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // Test all validation rules comprehensively
 
 func TestValidateAndUpdateSetting_FetchSize(t *testing.T) {
@@ -200,7 +213,14 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 
 	for _, setting := range unknownSettings {
 		t.Run("unknown_setting_"+setting, func(t *testing.T) {
-			originalCfg := cfg
+			// Capture original values
+			originalFetchSize := cfg.LogFetchSize
+			originalEnvironment := cfg.Environment
+			originalAppInsightsKey := cfg.ApplicationInsightsKey
+			originalTenantID := cfg.OAuth2.TenantID
+			originalClientID := cfg.OAuth2.ClientID
+			originalScopes := append([]string(nil), cfg.OAuth2.Scopes...) // Create a copy
+
 			err := cfg.ValidateAndUpdateSetting(setting, "some-value")
 
 			if err == nil {
@@ -213,7 +233,12 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 			}
 
 			// Config should not be modified for unknown settings
-			if cfg != originalCfg {
+			if cfg.LogFetchSize != originalFetchSize ||
+				cfg.Environment != originalEnvironment ||
+				cfg.ApplicationInsightsKey != originalAppInsightsKey ||
+				cfg.OAuth2.TenantID != originalTenantID ||
+				cfg.OAuth2.ClientID != originalClientID ||
+				!equalStringSlices(cfg.OAuth2.Scopes, originalScopes) {
 				t.Errorf("Expected config to remain unchanged for unknown setting %q", setting)
 			}
 		})
@@ -297,7 +322,7 @@ func TestListAllSettings(t *testing.T) {
 	settings := cfg.ListAllSettings()
 
 	// Check that all expected settings are present
-	expectedSettings := []string{"fetchSize", "environment", "applicationInsightsKey"}
+	expectedSettings := []string{"fetchSize", "environment", "applicationInsightsKey", "oauth2.tenantId", "oauth2.clientId", "oauth2.scopes"}
 	for _, expectedSetting := range expectedSettings {
 		if _, exists := settings[expectedSetting]; !exists {
 			t.Errorf("Expected setting %q to be present in ListAllSettings", expectedSetting)
@@ -314,10 +339,20 @@ func TestListAllSettings(t *testing.T) {
 	if settings["applicationInsightsKey"] != "list...6789" {
 		t.Errorf("Expected applicationInsightsKey to be masked, got %q", settings["applicationInsightsKey"])
 	}
+	// Check OAuth2 default values
+	if settings["oauth2.tenantId"] != "e48da249-7c64-41ec-8c89-cea18b6608fa" {
+		t.Errorf("Expected oauth2.tenantId to be the default value, got %q", settings["oauth2.tenantId"])
+	}
+	if settings["oauth2.clientId"] != "3b065ad6-067e-41f2-8cf7-19ddb0548a99" {
+		t.Errorf("Expected oauth2.clientId to be the default value, got %q", settings["oauth2.clientId"])
+	}
+	if settings["oauth2.scopes"] != "https://api.applicationinsights.io/Data.Read" {
+		t.Errorf("Expected oauth2.scopes to be the default value, got %q", settings["oauth2.scopes"])
+	}
 
 	// Check that no unexpected settings are present
-	if len(settings) != 3 {
-		t.Errorf("Expected exactly 3 settings, got %d: %v", len(settings), settings)
+	if len(settings) != 6 {
+		t.Errorf("Expected exactly 6 settings, got %d: %v", len(settings), settings)
 	}
 }
 

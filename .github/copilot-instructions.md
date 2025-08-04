@@ -2,8 +2,8 @@
 
 ## Development Workflow & Standards (CRITICAL)
 
-### Task List
-It is critical you always use the task list to plan and track your work, even if there is only 1 or 2 tasks. This ensures nothing is overlooked and helps maintain focus on priorities.
+### Todos
+It is critical you always use the todos tool to plan and track your work, even if there is only 1 or 2 tasks. This ensures nothing is overlooked and helps maintain focus on priorities.
 
 ### ⚠️ MANDATORY: Clean Build & Linting
 **BEFORE ANY CODE SUBMISSION OR RESPONSE**, you MUST run the complete linting suite and ensure a clean build:

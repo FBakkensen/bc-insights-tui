@@ -18,7 +18,17 @@ const (
 	flagEnvironment = "environment"
 	flagFetchSize   = "fetch-size"
 	flagAppInsights = "app-insights-key"
+
+	// Common strings
+	notSetValue = "(not set)"
 )
+
+// OAuth2Config holds OAuth2 authentication settings
+type OAuth2Config struct {
+	TenantID string   `json:"tenant_id" yaml:"tenant_id"`
+	ClientID string   `json:"client_id" yaml:"client_id"`
+	Scopes   []string `json:"scopes" yaml:"scopes"`
+}
 
 // Config holds application settings
 type Config struct {
@@ -26,6 +36,7 @@ type Config struct {
 	LogFetchSize           int           `json:"fetchSize" yaml:"fetchSize"`
 	Environment            string        `json:"environment" yaml:"environment"`
 	ApplicationInsightsKey string        `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
+	OAuth2                 OAuth2Config  `json:"oauth2" yaml:"oauth2"`
 }
 
 // NewConfig creates a new Config with default values and initialized mutex
@@ -35,6 +46,11 @@ func NewConfig() Config {
 		LogFetchSize:           50,
 		Environment:            "Development",
 		ApplicationInsightsKey: "",
+		OAuth2: OAuth2Config{
+			TenantID: "e48da249-7c64-41ec-8c89-cea18b6608fa",
+			ClientID: "3b065ad6-067e-41f2-8cf7-19ddb0548a99",
+			Scopes:   []string{"https://api.applicationinsights.io/Data.Read"},
+		},
 	}
 }
 
@@ -141,6 +157,22 @@ func applyEnvironmentVariables(cfg *Config) {
 	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
 		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
 	}
+
+	// OAuth2 environment variables
+	if _, exists := os.LookupEnv("BCINSIGHTS_OAUTH2_TENANT_ID"); exists {
+		cfg.OAuth2.TenantID = os.Getenv("BCINSIGHTS_OAUTH2_TENANT_ID")
+	}
+	if _, exists := os.LookupEnv("BCINSIGHTS_OAUTH2_CLIENT_ID"); exists {
+		cfg.OAuth2.ClientID = os.Getenv("BCINSIGHTS_OAUTH2_CLIENT_ID")
+	}
+	if val := os.Getenv("BCINSIGHTS_OAUTH2_SCOPES"); val != "" {
+		// Split scopes by comma
+		cfg.OAuth2.Scopes = strings.Split(val, ",")
+		// Trim whitespace from each scope
+		for i, scope := range cfg.OAuth2.Scopes {
+			cfg.OAuth2.Scopes[i] = strings.TrimSpace(scope)
+		}
+	}
 }
 
 // applyCommandLineFlags applies command line flag overrides
@@ -210,6 +242,17 @@ func mergeConfig(base, file *Config) {
 	if file.ApplicationInsightsKey != "" {
 		base.ApplicationInsightsKey = file.ApplicationInsightsKey
 	}
+
+	// Merge OAuth2 configuration
+	if file.OAuth2.TenantID != "" {
+		base.OAuth2.TenantID = file.OAuth2.TenantID
+	}
+	if file.OAuth2.ClientID != "" {
+		base.OAuth2.ClientID = file.OAuth2.ClientID
+	}
+	if len(file.OAuth2.Scopes) > 0 {
+		base.OAuth2.Scopes = file.OAuth2.Scopes
+	}
 }
 
 // ValidateAndUpdateSetting validates and updates a configuration setting
@@ -236,6 +279,31 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 	case "applicationInsightsKey":
 		// Allow empty for clearing the key
 		c.ApplicationInsightsKey = value
+	case "oauth2.tenantId":
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return fmt.Errorf("oauth2.tenantId cannot be empty")
+		}
+		c.OAuth2.TenantID = trimmed
+	case "oauth2.clientId":
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return fmt.Errorf("oauth2.clientId cannot be empty")
+		}
+		c.OAuth2.ClientID = trimmed
+	case "oauth2.scopes":
+		// Split scopes by comma and trim whitespace
+		if value == "" {
+			return fmt.Errorf("oauth2.scopes cannot be empty")
+		}
+		scopes := strings.Split(value, ",")
+		for i, scope := range scopes {
+			scopes[i] = strings.TrimSpace(scope)
+			if scopes[i] == "" {
+				return fmt.Errorf("oauth2.scopes cannot contain empty scopes")
+			}
+		}
+		c.OAuth2.Scopes = scopes
 	default:
 		return fmt.Errorf("unknown setting: %s", name)
 	}
@@ -254,13 +322,28 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 		return c.Environment, nil
 	case "applicationInsightsKey":
 		if c.ApplicationInsightsKey == "" {
-			return "(not set)", nil
+			return notSetValue, nil
 		}
 		// Mask the key for display
 		if len(c.ApplicationInsightsKey) > 8 {
 			return c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:], nil
 		}
 		return "***", nil
+	case "oauth2.tenantId":
+		if c.OAuth2.TenantID == "" {
+			return notSetValue, nil
+		}
+		return c.OAuth2.TenantID, nil
+	case "oauth2.clientId":
+		if c.OAuth2.ClientID == "" {
+			return notSetValue, nil
+		}
+		return c.OAuth2.ClientID, nil
+	case "oauth2.scopes":
+		if len(c.OAuth2.Scopes) == 0 {
+			return notSetValue, nil
+		}
+		return strings.Join(c.OAuth2.Scopes, ", "), nil
 	default:
 		return "", fmt.Errorf("unknown setting: %s", name)
 	}
@@ -275,11 +358,29 @@ func (c *Config) ListAllSettings() map[string]string {
 	settings["fetchSize"] = strconv.Itoa(c.LogFetchSize)
 	settings["environment"] = c.Environment
 	if c.ApplicationInsightsKey == "" {
-		settings["applicationInsightsKey"] = "(not set)"
+		settings["applicationInsightsKey"] = notSetValue
 	} else if len(c.ApplicationInsightsKey) > 8 {
 		settings["applicationInsightsKey"] = c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:]
 	} else {
 		settings["applicationInsightsKey"] = "***"
 	}
+
+	// OAuth2 settings
+	if c.OAuth2.TenantID == "" {
+		settings["oauth2.tenantId"] = notSetValue
+	} else {
+		settings["oauth2.tenantId"] = c.OAuth2.TenantID
+	}
+	if c.OAuth2.ClientID == "" {
+		settings["oauth2.clientId"] = notSetValue
+	} else {
+		settings["oauth2.clientId"] = c.OAuth2.ClientID
+	}
+	if len(c.OAuth2.Scopes) == 0 {
+		settings["oauth2.scopes"] = notSetValue
+	} else {
+		settings["oauth2.scopes"] = strings.Join(c.OAuth2.Scopes, ", ")
+	}
+
 	return settings
 }

@@ -1,6 +1,8 @@
 # golangci-lint configuration for bc-insights-tui
 # See https://golangci-lint.run/usage/configuration/
 
+version: "2"
+
 run:
   timeout: 5m
   issues-exit-code: 1
@@ -9,57 +11,24 @@ run:
 
 output:
   formats:
-    - format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
-
-linters-settings:
-  govet:
-    # Enable all analyzers
-    enable-all: true
-    # Disable analyzers by name
-    disable:
-      - fieldalignment # Too strict for TUI models
-
-  gocyclo:
-    min-complexity: 15
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  misspell:
-    locale: US
-
-  gofumpt:
-    extra-rules: true
-
-  revive:
-    rules:
-      - name: exported
-        disabled: true
-      - name: package-comments
-        disabled: true
+    text:
+      path: stdout
+      colors: true
 
 linters:
   enable:
     - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
     - govet         # Go vet
     - ineffassign   # Detect ineffectual assignments
-    - staticcheck   # Advanced static analysis
-    - typecheck     # Type checking
+    - staticcheck   # Advanced static analysis (includes gosimple, stylecheck)
     - unused        # Find unused code
-    - gofmt         # Format code
-    - goimports     # Organize imports
+    - dupl          # Find duplicated code
     - goconst       # Find repeated strings
     - gocyclo       # Check cyclomatic complexity
     - misspell      # Check for misspellings
     - unconvert     # Remove unnecessary conversions
-    - dupl          # Find duplicated code
     - gosec         # Security audit
-    - gofumpt       # Stricter gofmt
-    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go (replacement for golint)
+    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go
 
   disable:
     - varnamelen    # Variable name length (too strict for TUI)
@@ -67,27 +36,79 @@ linters:
     - wrapcheck     # Wrap errors (can be too verbose)
     - nlreturn      # New line return (stylistic preference)
 
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # Too strict for TUI models
+
+    gocyclo:
+      min-complexity: 15
+
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+
+    misspell:
+      locale: US
+
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+          disabled: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Exclude some linters from running on tests files
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - dupl
+          - gosec
+
+      # Exclude some staticcheck messages for TUI models
+      - linters:
+          - staticcheck
+        text: "SA1019:" # Ignore deprecation warnings for stable APIs
+
+      # Allow embedding in TUI models (common pattern in Bubble Tea)
+      - path: tui/
+        linters:
+          - revive
+        text: "should not use dot imports"
+
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+
+  settings:
+    gofumpt:
+      extra-rules: true
+
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
 issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-
-    # Exclude some staticcheck messages for TUI models
-    - linters:
-        - staticcheck
-      text: "SA1019:" # Ignore deprecation warnings for stable APIs
-
-    # Allow embedding in TUI models (common pattern in Bubble Tea)
-    - path: tui/
-      linters:
-        - revive
-      text: "should not use dot imports"
-
   max-issues-per-linter: 0
   max-same-issues: 0
   new: false

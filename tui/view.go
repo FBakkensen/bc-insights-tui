@@ -6,10 +6,176 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/charmbracelet/lipgloss"
 )
 
 func (m Model) View() string {
+	// Handle authentication views
+	switch m.AuthState {
+	case auth.AuthStateRequired:
+		return m.renderAuthRequiredView()
+	case auth.AuthStateInProgress:
+		return m.renderDeviceCodeView()
+	case auth.AuthStateFailed:
+		return m.renderAuthFailedView()
+	case auth.AuthStateCompleted:
+		// Continue to main view
+	case auth.AuthStateUnknown:
+		// Continue to main view (for now)
+	}
+
+	return m.renderMainView()
+}
+
+func (m Model) renderAuthRequiredView() string {
+	var (
+		titleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("39")).
+				Bold(true).
+				Align(lipgloss.Center)
+
+		contentStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("24")).
+				Padding(2, 4).
+				Width(60).
+				Align(lipgloss.Center)
+
+		instructionStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214")).
+					Bold(true)
+	)
+
+	var content strings.Builder
+	content.WriteString(titleStyle.Render("🔐 Authentication Required"))
+	content.WriteString("\n\n")
+	content.WriteString("Welcome to bc-insights-tui!\n\n")
+	content.WriteString("You need to authenticate with your Azure account to access\n")
+	content.WriteString("Application Insights data.\n\n")
+	content.WriteString(instructionStyle.Render("Press any key to start the authentication process..."))
+	content.WriteString("\n\n")
+	content.WriteString("Or press 'q' to quit.")
+
+	box := contentStyle.Render(content.String())
+
+	// Center the box on screen
+	return lipgloss.Place(m.WindowWidth, m.WindowHeight, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderDeviceCodeView() string {
+	var (
+		titleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("39")).
+				Bold(true).
+				Align(lipgloss.Center)
+
+		contentStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("226")).
+				Padding(2, 4).
+				Width(70).
+				Align(lipgloss.Center)
+
+		codeStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("46")).
+				Bold(true).
+				Background(lipgloss.Color("235")).
+				Padding(0, 1)
+
+		urlStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("33")).
+				Underline(true)
+
+		spinnerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214"))
+	)
+
+	var content strings.Builder
+	content.WriteString(titleStyle.Render("🔐 Azure Authentication"))
+	content.WriteString("\n\n")
+
+	if m.DeviceCode != nil {
+		content.WriteString("1. Open your web browser and go to:\n")
+		content.WriteString("   " + urlStyle.Render(m.DeviceCode.VerificationURI))
+		content.WriteString("\n\n")
+		content.WriteString("2. Enter this device code:\n")
+		content.WriteString("   " + codeStyle.Render(m.DeviceCode.UserCode))
+		content.WriteString("\n\n")
+		content.WriteString("3. Complete the sign-in process in your browser\n\n")
+		content.WriteString(spinnerStyle.Render("⏳ Waiting for authentication to complete..."))
+		content.WriteString("\n\n")
+		content.WriteString(fmt.Sprintf("Code expires in %d minutes", m.DeviceCode.ExpiresIn/60))
+	} else {
+		content.WriteString(spinnerStyle.Render("⏳ Preparing authentication..."))
+	}
+
+	content.WriteString("\n\n")
+	content.WriteString("Press 'q' to cancel and quit.")
+
+	box := contentStyle.Render(content.String())
+
+	// Center the box on screen
+	return lipgloss.Place(m.WindowWidth, m.WindowHeight, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderAuthFailedView() string {
+	var (
+		titleStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("9")).
+				Bold(true).
+				Align(lipgloss.Center)
+
+		contentStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("9")).
+				Padding(2, 4).
+				Width(70).
+				Align(lipgloss.Center)
+
+		errorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("9"))
+
+		instructionStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("214")).
+					Bold(true)
+	)
+
+	var content strings.Builder
+	content.WriteString(titleStyle.Render("❌ Authentication Failed"))
+	content.WriteString("\n\n")
+
+	if m.AuthError != nil {
+		errorMsg := m.AuthError.Error()
+		if strings.Contains(errorMsg, "authorization_declined") {
+			content.WriteString("Authentication was declined in the browser.\n\n")
+			content.WriteString("Please restart the login process and authorize the application.")
+		} else if strings.Contains(errorMsg, "expired_token") {
+			content.WriteString("The device code has expired.\n\n")
+			content.WriteString("Please restart the authentication process.")
+		} else if strings.Contains(errorMsg, "invalid_client") {
+			content.WriteString("Configuration error: Invalid client credentials.\n\n")
+			content.WriteString("Please check your Azure configuration and try again.")
+		} else {
+			content.WriteString("Authentication failed:\n\n")
+			content.WriteString(errorStyle.Render(errorMsg))
+		}
+	} else {
+		content.WriteString("Authentication failed due to an unknown error.")
+	}
+
+	content.WriteString("\n\n")
+	content.WriteString(instructionStyle.Render("Press 'r' to retry authentication"))
+	content.WriteString("\n")
+	content.WriteString("Press 'q' to quit")
+
+	box := contentStyle.Render(content.String())
+
+	// Center the box on screen
+	return lipgloss.Place(m.WindowWidth, m.WindowHeight, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m Model) renderMainView() string {
 	// Define styles for the full-screen layout
 	var (
 		// Header style - top border bar
@@ -71,8 +237,12 @@ func (m Model) View() string {
 	content.WriteString("Built specifically for Microsoft Dynamics 365 Business Central developers\n")
 	content.WriteString("to analyze telemetry data with an AI-powered, command palette-driven workflow.\n\n")
 
-	// Status section
-	content.WriteString(statusStyle.Render("🔧 Current Status: Not authenticated (authentication required)"))
+	// Status section based on authentication state
+	authStatus := "✅ Authenticated and ready!"
+	if m.AuthState != auth.AuthStateCompleted {
+		authStatus = "🔧 Authentication required"
+	}
+	content.WriteString(statusStyle.Render("Status: " + authStatus))
 	content.WriteString("\n\n")
 
 	// Keyboard shortcuts section
@@ -106,6 +276,12 @@ func (m Model) View() string {
 		}
 		content.WriteString(fmt.Sprintf(bulletStyle.Render("• Application Insights Key: %s"), masked))
 	}
+	content.WriteString("\n")
+
+	// OAuth2 configuration
+	content.WriteString(fmt.Sprintf(bulletStyle.Render("• Azure Tenant ID: %s"), m.Config.OAuth2.TenantID))
+	content.WriteString("\n")
+	content.WriteString(fmt.Sprintf(bulletStyle.Render("• Azure Client ID: %s"), m.Config.OAuth2.ClientID))
 	content.WriteString("\n")
 
 	// Command feedback section
