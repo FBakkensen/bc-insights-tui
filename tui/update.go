@@ -3,16 +3,136 @@ package tui
 // Update logic for Bubble Tea TUI
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/FBakkensen/bc-insights-tui/auth"
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/oauth2"
 )
+
+// Message types for authentication flow
+type authCheckMsg struct {
+	hasValidToken bool
+}
+
+type deviceCodeMsg struct {
+	deviceCode *auth.DeviceCodeResponse
+	err        error
+}
+
+type authCompleteMsg struct {
+	token *oauth2.Token
+	err   error
+}
+
+type authInitiateMsg struct{}
+
+// Commands for authentication flow
+func checkAuthStatus(authenticator *auth.Authenticator) tea.Cmd {
+	return func() tea.Msg {
+		hasValid := authenticator.HasValidToken()
+		return authCheckMsg{hasValidToken: hasValid}
+	}
+}
+
+func initiateDeviceFlow(authenticator *auth.Authenticator) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		deviceCode, err := authenticator.InitiateDeviceFlow(ctx)
+		return deviceCodeMsg{deviceCode: deviceCode, err: err}
+	}
+}
+
+func pollForToken(authenticator *auth.Authenticator, deviceCode string, interval int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+
+		token, err := authenticator.PollForToken(ctx, deviceCode, interval)
+		return authCompleteMsg{token: token, err: err}
+	}
+}
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	// Handle authentication messages
+	case authCheckMsg:
+		if msg.hasValidToken {
+			m.AuthState = auth.AuthStateCompleted
+		} else {
+			m.AuthState = auth.AuthStateRequired
+		}
+		return m, nil
+
+	case authInitiateMsg:
+		m.AuthState = auth.AuthStateInProgress
+		return m, initiateDeviceFlow(m.Authenticator)
+
+	case deviceCodeMsg:
+		if msg.err != nil {
+			m.AuthState = auth.AuthStateFailed
+			m.AuthError = msg.err
+			return m, nil
+		}
+		m.DeviceCode = msg.deviceCode
+		return m, pollForToken(m.Authenticator, msg.deviceCode.DeviceCode, msg.deviceCode.Interval)
+
+	case authCompleteMsg:
+		if msg.err != nil {
+			m.AuthState = auth.AuthStateFailed
+			m.AuthError = msg.err
+			return m, nil
+		}
+
+		// Save token securely
+		if err := m.Authenticator.SaveTokenSecurely(msg.token); err != nil {
+			m.AuthState = auth.AuthStateFailed
+			m.AuthError = fmt.Errorf("failed to save token: %w", err)
+			return m, nil
+		}
+
+		m.AuthState = auth.AuthStateCompleted
+		m.DeviceCode = nil
+		m.AuthError = nil
+		return m, nil
+
 	case tea.KeyMsg:
-		// Handle command palette input first
+		// Handle authentication state key inputs
+		switch m.AuthState {
+		case auth.AuthStateRequired:
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			default:
+				// Any other key starts authentication
+				return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
+			}
+
+		case auth.AuthStateInProgress:
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			}
+			return m, nil
+
+		case auth.AuthStateFailed:
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "r":
+				// Retry authentication
+				m.AuthError = nil
+				return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
+			}
+			return m, nil
+		}
+
+		// Handle command palette input first (only in main view)
 		if m.CommandPalette {
 			switch msg.String() {
 			case "esc":
@@ -48,14 +168,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Handle main application input
+		// Handle main application input (only when authenticated)
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "ctrl+p":
-			// Open command palette
-			m.CommandPalette = true
-			m.CommandInput = ""
+			// Only allow command palette when authenticated
+			if m.AuthState == auth.AuthStateCompleted {
+				m.CommandPalette = true
+				m.CommandInput = ""
+			}
 			return m, nil
 		case "esc":
 			// Close any open modals (currently just command palette)
@@ -88,8 +210,47 @@ func (m *Model) processCommand(cmd string) {
 	switch parts[0] {
 	case "set":
 		m.handleSetCommand(parts[1:])
+	case "auth":
+		m.handleAuthCommand(parts[1:])
 	default:
 		m.FeedbackMessage = fmt.Sprintf("Unknown command: %s", parts[0])
+		m.FeedbackIsError = true
+	}
+}
+
+// handleAuthCommand processes authentication-related commands
+func (m *Model) handleAuthCommand(args []string) {
+	if len(args) == 0 {
+		// Show auth status
+		switch m.AuthState {
+		case auth.AuthStateCompleted:
+			m.FeedbackMessage = "✓ Authentication: Active and valid"
+		case auth.AuthStateRequired:
+			m.FeedbackMessage = "⚠ Authentication: Required"
+		case auth.AuthStateInProgress:
+			m.FeedbackMessage = "⏳ Authentication: In progress"
+		case auth.AuthStateFailed:
+			m.FeedbackMessage = "❌ Authentication: Failed"
+		default:
+			m.FeedbackMessage = "❓ Authentication: Unknown status"
+		}
+		return
+	}
+
+	switch args[0] {
+	case "logout", "clear":
+		if err := m.Authenticator.ClearToken(); err != nil {
+			m.FeedbackMessage = fmt.Sprintf("Failed to clear authentication: %v", err)
+			m.FeedbackIsError = true
+		} else {
+			m.AuthState = auth.AuthStateRequired
+			m.FeedbackMessage = "✓ Authentication cleared. You will need to re-authenticate."
+		}
+	case "refresh":
+		// This would normally be handled automatically, but allow manual refresh
+		m.FeedbackMessage = "Token refresh is handled automatically when needed"
+	default:
+		m.FeedbackMessage = fmt.Sprintf("Unknown auth command: %s. Available: logout, clear, refresh", args[0])
 		m.FeedbackIsError = true
 	}
 }

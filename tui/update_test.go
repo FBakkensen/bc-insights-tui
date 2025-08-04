@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -38,6 +39,9 @@ func TestUpdate_QuitCommands(t *testing.T) {
 func TestUpdate_CommandPaletteTrigger(t *testing.T) {
 	cfg := config.NewConfig()
 	model := InitialModel(cfg)
+
+	// Set model to authenticated state to allow command palette
+	model.AuthState = auth.AuthStateCompleted
 
 	// Test Ctrl+P opens command palette
 	keyMsg := tea.KeyMsg{Type: tea.KeyCtrlP}

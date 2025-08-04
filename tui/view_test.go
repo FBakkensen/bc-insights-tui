@@ -361,19 +361,16 @@ func TestView_AuthenticationStatus(t *testing.T) {
 	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
+	// Model starts with AuthStateUnknown, should show main view
 	output := model.View()
 
-	// Test authentication placeholder
-	if !strings.Contains(output, "Not authenticated") {
-		t.Errorf("Expected authentication status placeholder")
+	// Test that auth configuration is shown
+	if !strings.Contains(output, "Azure Tenant ID") {
+		t.Error("Expected Azure Tenant ID to be displayed")
 	}
 
-	if !strings.Contains(output, "authentication required") {
-		t.Errorf("Expected authentication requirement message")
-	}
-
-	if !strings.Contains(output, "🔧 Current Status:") {
-		t.Errorf("Expected status section with icon")
+	if !strings.Contains(output, "Azure Client ID") {
+		t.Error("Expected Azure Client ID to be displayed")
 	}
 }
 
@@ -384,13 +381,13 @@ func TestView_ApplicationStateDisplay(t *testing.T) {
 	output := model.View()
 
 	// Test current state is clearly displayed
-	if !strings.Contains(output, "Current Status:") {
-		t.Errorf("Expected current status display")
+	if !strings.Contains(output, "Status:") {
+		t.Error("Expected status display")
 	}
 
-	// Should indicate ready state with authentication requirement
-	if !strings.Contains(output, "Not authenticated") {
-		t.Errorf("Expected to show authentication required state")
+	// Should show authentication status
+	if !strings.Contains(output, "Authentication") || !strings.Contains(output, "required") {
+		t.Error("Expected to show authentication status")
 	}
 }
 

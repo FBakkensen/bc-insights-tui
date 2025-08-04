@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -64,10 +65,10 @@ func TestMain_TUIInitialization(t *testing.T) {
 		t.Error("Expected NewProgram to return a valid program")
 	}
 
-	// Test initial command
+	// Test initial command - should return auth check
 	cmd := model.Init()
-	if cmd != nil {
-		t.Errorf("Expected Init() to return nil, got %v", cmd)
+	if cmd == nil {
+		t.Error("Expected Init() to return authentication check command, got nil")
 	}
 }
 
@@ -84,7 +85,8 @@ func TestMain_TUIBasicInteraction(t *testing.T) {
 		t.Errorf("Expected quit command to return quit function, got nil")
 	}
 
-	// Test command palette
+	// Test command palette - only works when authenticated
+	model.AuthState = auth.AuthStateCompleted
 	ctrlPKey := tea.KeyMsg{Type: tea.KeyCtrlP}
 	newModel, cmd := model.Update(ctrlPKey)
 
@@ -384,6 +386,9 @@ func TestMain_SetCommandEndToEnd(t *testing.T) {
 	cfg := config.NewConfig()
 	cfg.Environment = "Original"
 	model := tui.InitialModel(cfg)
+
+	// Set authenticated state to allow command palette
+	model.AuthState = auth.AuthStateCompleted
 
 	// Open command palette
 	ctrlPKey := tea.KeyMsg{Type: tea.KeyCtrlP}
