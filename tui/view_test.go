@@ -9,7 +9,7 @@ import (
 )
 
 func TestView_BasicOutput(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -42,7 +42,7 @@ func TestView_BasicOutput(t *testing.T) {
 }
 
 func TestView_TerminalSizeDisplay(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.WindowWidth = 100
 	model.WindowHeight = 30
@@ -67,7 +67,8 @@ func TestView_ConfigValues(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config.Config{LogFetchSize: tc.fetchSize}
+			cfg := config.NewConfig()
+			cfg.LogFetchSize = tc.fetchSize
 			model := InitialModel(cfg)
 
 			output := model.View()
@@ -81,7 +82,7 @@ func TestView_ConfigValues(t *testing.T) {
 }
 
 func TestView_CommandPaletteClosed(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = false
 
@@ -98,7 +99,7 @@ func TestView_CommandPaletteClosed(t *testing.T) {
 }
 
 func TestView_CommandPaletteOpen(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = ""
@@ -125,7 +126,7 @@ func TestView_CommandPaletteOpen(t *testing.T) {
 }
 
 func TestView_CommandPaletteWithInput(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = "filter: test"
@@ -157,7 +158,7 @@ func TestView_WindowSizeVariations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config.Config{LogFetchSize: 50}
+			cfg := config.NewConfig()
 			model := InitialModel(cfg)
 			model.WindowWidth = tc.width
 			model.WindowHeight = tc.height
@@ -197,7 +198,7 @@ func TestView_WindowSizeVariations(t *testing.T) {
 }
 
 func TestView_ConsistentStructure(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 75}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test without command palette
@@ -245,7 +246,7 @@ func TestView_ConsistentStructure(t *testing.T) {
 }
 
 func TestView_StringFormatting(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -286,7 +287,7 @@ func TestView_StringFormatting(t *testing.T) {
 // New tests for full-screen welcome view functionality
 
 func TestView_FullScreenLayout(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.WindowWidth = 120
 	model.WindowHeight = 40
@@ -322,7 +323,7 @@ func TestView_FullScreenLayout(t *testing.T) {
 }
 
 func TestView_ApplicationVersionDisplay(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -337,7 +338,7 @@ func TestView_ApplicationVersionDisplay(t *testing.T) {
 }
 
 func TestView_BusinessCentralContext(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -357,7 +358,7 @@ func TestView_BusinessCentralContext(t *testing.T) {
 }
 
 func TestView_AuthenticationStatus(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -377,7 +378,7 @@ func TestView_AuthenticationStatus(t *testing.T) {
 }
 
 func TestView_ApplicationStateDisplay(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -394,7 +395,7 @@ func TestView_ApplicationStateDisplay(t *testing.T) {
 }
 
 func TestView_EnhancedContent(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -441,7 +442,7 @@ func TestView_ResponsiveDesign(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config.Config{LogFetchSize: 50}
+			cfg := config.NewConfig()
 			model := InitialModel(cfg)
 			model.WindowWidth = tc.width
 			model.WindowHeight = tc.height
@@ -472,7 +473,7 @@ func TestView_ResponsiveDesign(t *testing.T) {
 }
 
 func TestView_ColorSchemeCompatibility(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -491,7 +492,7 @@ func TestView_ColorSchemeCompatibility(t *testing.T) {
 }
 
 func TestView_ProfessionalStyling(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -519,11 +520,10 @@ func TestView_ProfessionalStyling(t *testing.T) {
 // Additional view tests as requested in the issue
 
 func TestView_AllConfigurationDisplay(t *testing.T) {
-	cfg := config.Config{
-		LogFetchSize:           75,
-		Environment:            "ConfigTest",
-		ApplicationInsightsKey: "display-test-key",
-	}
+	cfg := config.NewConfig()
+	cfg.LogFetchSize = 75
+	cfg.Environment = "ConfigTest"
+	cfg.ApplicationInsightsKey = "display-test-key"
 	model := InitialModel(cfg)
 
 	output := model.View()
@@ -544,17 +544,17 @@ func TestView_AllConfigurationDisplay(t *testing.T) {
 
 func TestView_ConfigurationFormatting(t *testing.T) {
 	testCases := []struct {
-		name     string
-		config   config.Config
-		expected []string
+		name                   string
+		logFetchSize           int
+		environment            string
+		applicationInsightsKey string
+		expected               []string
 	}{
 		{
-			name: "standard configuration",
-			config: config.Config{
-				LogFetchSize:           100,
-				Environment:            "Production",
-				ApplicationInsightsKey: "InstrumentationKey=abc123def456",
-			},
+			name:                   "standard configuration",
+			logFetchSize:           100,
+			environment:            "Production",
+			applicationInsightsKey: "InstrumentationKey=abc123def456",
 			expected: []string{
 				"Log fetch size: 100",
 				"Environment: Production",
@@ -562,12 +562,10 @@ func TestView_ConfigurationFormatting(t *testing.T) {
 			},
 		},
 		{
-			name: "short key configuration",
-			config: config.Config{
-				LogFetchSize:           25,
-				Environment:            "Dev",
-				ApplicationInsightsKey: "short",
-			},
+			name:                   "short key configuration",
+			logFetchSize:           25,
+			environment:            "Dev",
+			applicationInsightsKey: "short",
 			expected: []string{
 				"Log fetch size: 25",
 				"Environment: Dev",
@@ -575,12 +573,10 @@ func TestView_ConfigurationFormatting(t *testing.T) {
 			},
 		},
 		{
-			name: "empty key configuration",
-			config: config.Config{
-				LogFetchSize:           200,
-				Environment:            "Testing",
-				ApplicationInsightsKey: "",
-			},
+			name:                   "empty key configuration",
+			logFetchSize:           200,
+			environment:            "Testing",
+			applicationInsightsKey: "",
 			expected: []string{
 				"Log fetch size: 200",
 				"Environment: Testing",
@@ -591,7 +587,11 @@ func TestView_ConfigurationFormatting(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			model := InitialModel(tc.config)
+			cfg := config.NewConfig()
+			cfg.LogFetchSize = tc.logFetchSize
+			cfg.Environment = tc.environment
+			cfg.ApplicationInsightsKey = tc.applicationInsightsKey
+			model := InitialModel(cfg)
 			output := model.View()
 
 			for _, expected := range tc.expected {
@@ -605,7 +605,8 @@ func TestView_ConfigurationFormatting(t *testing.T) {
 
 func TestView_ConfigurationUpdates(t *testing.T) {
 	// Test that view updates when configuration changes
-	cfg := config.Config{LogFetchSize: 50, Environment: "Original"}
+	cfg := config.NewConfig()
+	cfg.Environment = "Original"
 	model := InitialModel(cfg)
 
 	// Get initial view
@@ -641,7 +642,7 @@ func TestView_ConfigurationUpdates(t *testing.T) {
 }
 
 func TestView_SetCommandFeedback(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	testCases := []struct {

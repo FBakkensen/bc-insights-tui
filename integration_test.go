@@ -73,7 +73,7 @@ func TestMain_TUIInitialization(t *testing.T) {
 
 func TestMain_TUIBasicInteraction(t *testing.T) {
 	// Test basic TUI interactions
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := tui.InitialModel(cfg)
 
 	// Test quit command
@@ -381,7 +381,8 @@ func TestMain_CommandLineFlagsToUI(t *testing.T) {
 
 func TestMain_SetCommandEndToEnd(t *testing.T) {
 	// Test complete set command workflow from input to UI update
-	cfg := config.Config{LogFetchSize: 50, Environment: "Original"}
+	cfg := config.NewConfig()
+	cfg.Environment = "Original"
 	model := tui.InitialModel(cfg)
 
 	// Open command palette
@@ -437,7 +438,8 @@ func TestMain_SetCommandEndToEnd(t *testing.T) {
 
 func TestMain_ConfigPersistence(t *testing.T) {
 	// Test that configuration changes persist during the session
-	cfg := config.Config{LogFetchSize: 50, Environment: "Initial"}
+	cfg := config.NewConfig()
+	cfg.Environment = "Initial"
 	model := tui.InitialModel(cfg)
 
 	// Update config via set command

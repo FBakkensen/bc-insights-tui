@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -21,9 +22,20 @@ const (
 
 // Config holds application settings
 type Config struct {
-	LogFetchSize           int    `json:"fetchSize" yaml:"fetchSize"`
-	Environment            string `json:"environment" yaml:"environment"`
-	ApplicationInsightsKey string `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
+	mu                     *sync.RWMutex `json:"-" yaml:"-"`
+	LogFetchSize           int           `json:"fetchSize" yaml:"fetchSize"`
+	Environment            string        `json:"environment" yaml:"environment"`
+	ApplicationInsightsKey string        `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
+}
+
+// NewConfig creates a new Config with default values and initialized mutex
+func NewConfig() Config {
+	return Config{
+		mu:                     &sync.RWMutex{},
+		LogFetchSize:           50,
+		Environment:            "Development",
+		ApplicationInsightsKey: "",
+	}
 }
 
 // LoadConfig loads configuration from multiple sources in priority order:
@@ -43,11 +55,7 @@ func LoadConfigWithArgs(args []string) Config {
 	flagsSet := trackSetFlags(flagSet)
 
 	// Start with default values
-	cfg := Config{
-		LogFetchSize:           50,
-		Environment:            "Development",
-		ApplicationInsightsKey: "",
-	}
+	cfg := NewConfig()
 
 	// Load from configuration file if specified or found
 	loadConfigFromFileIfExists(&cfg, *flags.configFile)
@@ -185,6 +193,9 @@ func loadConfigFromFile(filename string) (*Config, error) {
 		return nil, err
 	}
 
+	// Initialize mutex after unmarshaling
+	cfg.mu = &sync.RWMutex{}
+
 	return &cfg, nil
 }
 
@@ -203,6 +214,9 @@ func mergeConfig(base, file *Config) {
 
 // ValidateAndUpdateSetting validates and updates a configuration setting
 func (c *Config) ValidateAndUpdateSetting(name, value string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	switch name {
 	case "fetchSize":
 		// Trim whitespace for parsing
@@ -230,6 +244,9 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 
 // GetSettingValue returns the current value of a setting as a string
 func (c *Config) GetSettingValue(name string) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	switch name {
 	case "fetchSize":
 		return strconv.Itoa(c.LogFetchSize), nil
@@ -251,6 +268,9 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 
 // ListAllSettings returns a map of all settings and their current values
 func (c *Config) ListAllSettings() map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	settings := make(map[string]string)
 	settings["fetchSize"] = strconv.Itoa(c.LogFetchSize)
 	settings["environment"] = c.Environment
