@@ -398,7 +398,7 @@ func TestLoadConfig_PriorityOrder(t *testing.T) {
 }
 
 func TestConfig_ValidationRules(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
 
 	testCases := []struct {
 		name        string
@@ -446,11 +446,10 @@ func TestConfig_ValidationRules(t *testing.T) {
 }
 
 func TestConfig_AllSettingsPresent(t *testing.T) {
-	cfg := Config{
-		LogFetchSize:           123,
-		Environment:            "TestEnv",
-		ApplicationInsightsKey: "test-key",
-	}
+	cfg := NewConfig()
+	cfg.LogFetchSize = 123
+	cfg.Environment = "TestEnv"
+	cfg.ApplicationInsightsKey = "test-key"
 
 	// Test all settings can be retrieved
 	expectedSettings := map[string]bool{

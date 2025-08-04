@@ -8,7 +8,8 @@ import (
 // Test all validation rules comprehensively
 
 func TestValidateAndUpdateSetting_FetchSize(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
+	cfg.LogFetchSize = 0 // Reset to zero for testing validation logic
 
 	testCases := []struct {
 		name          string
@@ -40,7 +41,8 @@ func TestValidateAndUpdateSetting_FetchSize(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Reset config for each test
-			cfg = Config{}
+			cfg = NewConfig()
+			cfg.LogFetchSize = 0
 
 			err := cfg.ValidateAndUpdateSetting("fetchSize", tc.value)
 
@@ -68,7 +70,7 @@ func TestValidateAndUpdateSetting_FetchSize(t *testing.T) {
 }
 
 func TestValidateAndUpdateSetting_Environment(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
 
 	testCases := []struct {
 		name          string
@@ -101,7 +103,8 @@ func TestValidateAndUpdateSetting_Environment(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Reset config for each test
-			cfg = Config{}
+			cfg = NewConfig()
+			cfg.LogFetchSize = 0
 
 			err := cfg.ValidateAndUpdateSetting("environment", tc.value)
 
@@ -126,7 +129,7 @@ func TestValidateAndUpdateSetting_Environment(t *testing.T) {
 }
 
 func TestValidateAndUpdateSetting_ApplicationInsightsKey(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
 
 	testCases := []struct {
 		name          string
@@ -152,7 +155,8 @@ func TestValidateAndUpdateSetting_ApplicationInsightsKey(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Reset config for each test
-			cfg = Config{}
+			cfg = NewConfig()
+			cfg.LogFetchSize = 0
 
 			err := cfg.ValidateAndUpdateSetting("applicationInsightsKey", tc.value)
 
@@ -174,7 +178,7 @@ func TestValidateAndUpdateSetting_ApplicationInsightsKey(t *testing.T) {
 }
 
 func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
 
 	unknownSettings := []string{
 		"unknownSetting",
@@ -217,11 +221,10 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 }
 
 func TestGetSettingValue_AllSettings(t *testing.T) {
-	cfg := Config{
-		LogFetchSize:           123,
-		Environment:            "TestValue",
-		ApplicationInsightsKey: "test-key-123456789",
-	}
+	cfg := NewConfig()
+	cfg.LogFetchSize = 123
+	cfg.Environment = "TestValue"
+	cfg.ApplicationInsightsKey = "test-key-123456789"
 
 	testCases := []struct {
 		setting       string
@@ -270,7 +273,8 @@ func TestGetSettingValue_ApplicationInsightsKeyMasking(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ApplicationInsightsKey: tc.key}
+			cfg := NewConfig()
+			cfg.ApplicationInsightsKey = tc.key
 
 			value, err := cfg.GetSettingValue("applicationInsightsKey")
 			if err != nil {
@@ -285,11 +289,10 @@ func TestGetSettingValue_ApplicationInsightsKeyMasking(t *testing.T) {
 }
 
 func TestListAllSettings(t *testing.T) {
-	cfg := Config{
-		LogFetchSize:           456,
-		Environment:            "ListTestEnv",
-		ApplicationInsightsKey: "list-test-key-123456789",
-	}
+	cfg := NewConfig()
+	cfg.LogFetchSize = 456
+	cfg.Environment = "ListTestEnv"
+	cfg.ApplicationInsightsKey = "list-test-key-123456789"
 
 	settings := cfg.ListAllSettings()
 
@@ -332,11 +335,10 @@ func TestListAllSettings_EmptyAndShortKeys(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{
-				LogFetchSize:           100,
-				Environment:            "Test",
-				ApplicationInsightsKey: tc.applicationInsightsKey,
-			}
+			cfg := NewConfig()
+			cfg.LogFetchSize = 100
+			cfg.Environment = "Test"
+			cfg.ApplicationInsightsKey = tc.applicationInsightsKey
 
 			settings := cfg.ListAllSettings()
 
@@ -348,7 +350,7 @@ func TestListAllSettings_EmptyAndShortKeys(t *testing.T) {
 }
 
 func TestValidation_EdgeCases(t *testing.T) {
-	cfg := Config{}
+	cfg := NewConfig()
 
 	// Test edge cases that might cause panics or unexpected behavior
 	edgeCases := []struct {
@@ -376,11 +378,10 @@ func TestValidation_EdgeCases(t *testing.T) {
 
 func TestValidation_ConcurrentAccess(t *testing.T) {
 	// Test that validation is safe for concurrent access (no race conditions)
-	cfg := Config{
-		LogFetchSize:           50,
-		Environment:            "Concurrent",
-		ApplicationInsightsKey: "concurrent-key",
-	}
+	cfg := NewConfig()
+	cfg.LogFetchSize = 50
+	cfg.Environment = "Concurrent"
+	cfg.ApplicationInsightsKey = "concurrent-key"
 
 	// Run multiple goroutines to test concurrent access
 	done := make(chan bool, 10)

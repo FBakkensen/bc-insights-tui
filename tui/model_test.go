@@ -8,7 +8,8 @@ import (
 )
 
 func TestInitialModel_ProperInitialization(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 100}
+	cfg := config.NewConfig()
+	cfg.LogFetchSize = 100
 
 	model := InitialModel(cfg)
 
@@ -60,7 +61,8 @@ func TestInitialModel_HelpTextGeneration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := config.Config{LogFetchSize: tc.fetchSize}
+			cfg := config.NewConfig()
+			cfg.LogFetchSize = tc.fetchSize
 			model := InitialModel(cfg)
 
 			if !strings.Contains(model.HelpText, tc.shouldContain) {
@@ -76,7 +78,7 @@ func TestInitialModel_HelpTextGeneration(t *testing.T) {
 }
 
 func TestModel_Init(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	cmd := model.Init()
@@ -88,7 +90,7 @@ func TestModel_Init(t *testing.T) {
 }
 
 func TestModel_StatePreparation(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 75}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test that model is prepared for command palette integration
@@ -109,19 +111,17 @@ func TestModel_StatePreparation(t *testing.T) {
 
 func TestModel_ConfigIntegration(t *testing.T) {
 	// Test that different config values are properly integrated
-	testConfigs := []config.Config{
-		{LogFetchSize: 25},
-		{LogFetchSize: 100},
-		{LogFetchSize: 500},
-	}
+	testLogFetchSizes := []int{25, 100, 500}
 
-	for _, cfg := range testConfigs {
+	for _, fetchSize := range testLogFetchSizes {
+		cfg := config.NewConfig()
+		cfg.LogFetchSize = fetchSize
 		model := InitialModel(cfg)
 
 		// Verify config is stored
-		if model.Config.LogFetchSize != cfg.LogFetchSize {
+		if model.Config.LogFetchSize != fetchSize {
 			t.Errorf("Expected stored config LogFetchSize to be %d, got %d",
-				cfg.LogFetchSize, model.Config.LogFetchSize)
+				fetchSize, model.Config.LogFetchSize)
 		}
 
 		// Verify config is reflected in help text

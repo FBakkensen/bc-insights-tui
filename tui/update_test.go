@@ -9,7 +9,7 @@ import (
 )
 
 func TestUpdate_QuitCommands(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	quitCommands := []string{"q", "ctrl+c"}
@@ -36,7 +36,7 @@ func TestUpdate_QuitCommands(t *testing.T) {
 }
 
 func TestUpdate_CommandPaletteTrigger(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test Ctrl+P opens command palette
@@ -58,7 +58,7 @@ func TestUpdate_CommandPaletteTrigger(t *testing.T) {
 }
 
 func TestUpdate_CommandPaletteInput(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true // Open command palette
 
@@ -86,7 +86,7 @@ func TestUpdate_CommandPaletteInput(t *testing.T) {
 }
 
 func TestUpdate_CommandPaletteBackspace(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = testCommandInput
@@ -116,7 +116,7 @@ func TestUpdate_CommandPaletteBackspace(t *testing.T) {
 }
 
 func TestUpdate_CommandPaletteEscape(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = "some command"
@@ -140,7 +140,7 @@ func TestUpdate_CommandPaletteEscape(t *testing.T) {
 }
 
 func TestUpdate_CommandPaletteEnter(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = "filter: test"
@@ -164,7 +164,7 @@ func TestUpdate_CommandPaletteEnter(t *testing.T) {
 }
 
 func TestUpdate_EscapeInMainMode(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = false // Ensure we're in main mode
 
@@ -183,7 +183,7 @@ func TestUpdate_EscapeInMainMode(t *testing.T) {
 }
 
 func TestUpdate_WindowSizeMsg(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test window resize
@@ -205,7 +205,7 @@ func TestUpdate_WindowSizeMsg(t *testing.T) {
 }
 
 func TestUpdate_UnknownKeyHandling(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test unknown key in main mode
@@ -223,7 +223,7 @@ func TestUpdate_UnknownKeyHandling(t *testing.T) {
 }
 
 func TestUpdate_UnknownMessageType(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
 	// Test unknown message type
@@ -243,7 +243,7 @@ func TestUpdate_UnknownMessageType(t *testing.T) {
 // Additional command palette tests as requested in the issue
 
 func TestUpdate_SetCommand(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50, Environment: "Development", ApplicationInsightsKey: ""}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 
@@ -337,11 +337,10 @@ func TestUpdate_SetCommand(t *testing.T) {
 }
 
 func TestUpdate_SetCommandList(t *testing.T) {
-	cfg := config.Config{
-		LogFetchSize:           99,
-		Environment:            "ListTest",
-		ApplicationInsightsKey: "list-key",
-	}
+	cfg := config.NewConfig()
+	cfg.LogFetchSize = 99
+	cfg.Environment = "ListTest"
+	cfg.ApplicationInsightsKey = "list-key"
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = "set"
@@ -375,7 +374,7 @@ func TestUpdate_SetCommandList(t *testing.T) {
 }
 
 func TestUpdate_SetCommandValidation(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 
@@ -453,7 +452,7 @@ func TestUpdate_SetCommandValidation(t *testing.T) {
 }
 
 func TestUpdate_SetCommandConfirmation(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 	model.CommandInput = "set fetchSize=150"
@@ -486,7 +485,7 @@ func TestUpdate_SetCommandConfirmation(t *testing.T) {
 }
 
 func TestUpdate_SetCommandError(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 
@@ -537,7 +536,7 @@ func TestUpdate_SetCommandError(t *testing.T) {
 }
 
 func TestUpdate_CommandParsing(t *testing.T) {
-	cfg := config.Config{LogFetchSize: 50}
+	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 	model.CommandPalette = true
 
