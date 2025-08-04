@@ -2,13 +2,18 @@
 
 ## Development Workflow & Standards (CRITICAL)
 
+### Task List
+It is critical you always use the task list to plan and track your work, even if there is only 1 or 2 tasks. This ensures nothing is overlooked and helps maintain focus on priorities.
+
 ### ⚠️ MANDATORY: Clean Build & Linting
 **BEFORE ANY CODE SUBMISSION OR RESPONSE**, you MUST run the complete linting suite and ensure a clean build:
-```powershell
-go fmt ./... && go vet ./... && golangci-lint run --fast
+```bash
+make all
 ```
+This command runs the full pipeline: lint, race tests, and build.
 
 **CRITICAL REQUIREMENTS:**
+- ✅ **`make all` MUST complete without ANY errors or warnings**
 - ✅ All linting must pass with ZERO warnings or errors
 - ✅ Code must build successfully with `go build`
 - ✅ All tests must pass with `go test -race ./...`
