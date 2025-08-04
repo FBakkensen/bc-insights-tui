@@ -11,7 +11,7 @@ go fmt ./... && go vet ./... && golangci-lint run --fast
 **CRITICAL REQUIREMENTS:**
 - ✅ All linting must pass with ZERO warnings or errors
 - ✅ Code must build successfully with `go build`
-- ✅ All tests must pass with `go test ./...`
+- ✅ All tests must pass with `go test -race ./...`
 
 **Linting Configuration**: `.golangci.yml` includes strict rules with exceptions for TUI patterns (disabled `fieldalignment` for TUI models, allows embedding in TUI components).
 
