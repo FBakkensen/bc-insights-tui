@@ -20,7 +20,8 @@ import (
 const (
 	// Service name for keyring storage
 	serviceName = "bc-insights-tui"
-	tokenKey    = "oauth2-token"
+	// tokenKey is not a credential but a key name for storing tokens in the system keyring
+	tokenKey = "oauth2-token" // #nosec G101
 )
 
 // AuthState represents the current authentication state

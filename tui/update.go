@@ -13,6 +13,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
+const (
+	// Key combinations
+	quitKey = "ctrl+c"
+)
+
 // Message types for authentication flow
 type authCheckMsg struct {
 	hasValidToken bool
@@ -61,6 +66,24 @@ func pollForToken(authenticator *auth.Authenticator, deviceCode string, interval
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	// Handle authentication messages
+	case authCheckMsg, authInitiateMsg, deviceCodeMsg, authCompleteMsg:
+		return m.handleAuthMessages(msg)
+
+	case tea.KeyMsg:
+		return m.handleKeyMessages(msg)
+
+	case tea.WindowSizeMsg:
+		// Handle terminal resize
+		m.WindowWidth = msg.Width
+		m.WindowHeight = msg.Height
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleAuthMessages processes authentication-related messages
+func (m Model) handleAuthMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case authCheckMsg:
 		if msg.hasValidToken {
 			m.AuthState = auth.AuthStateCompleted
@@ -100,97 +123,104 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.DeviceCode = nil
 		m.AuthError = nil
 		return m, nil
+	}
+	return m, nil
+}
 
-	case tea.KeyMsg:
-		// Handle authentication state key inputs
-		switch m.AuthState {
-		case auth.AuthStateRequired:
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			default:
-				// Any other key starts authentication
-				return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
-			}
+// handleKeyMessages processes keyboard input
+func (m Model) handleKeyMessages(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Check for global quit commands first
+	if msg.String() == "q" || msg.String() == quitKey {
+		return m, tea.Quit
+	}
 
-		case auth.AuthStateInProgress:
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			}
-			return m, nil
+	// Handle command palette input first (highest priority when active)
+	if m.CommandPalette {
+		return m.handleCommandPaletteKeys(msg)
+	}
 
-		case auth.AuthStateFailed:
-			switch msg.String() {
-			case "q", "ctrl+c":
-				return m, tea.Quit
-			case "r":
-				// Retry authentication
-				m.AuthError = nil
-				return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
-			}
-			return m, nil
-		}
+	// Handle authentication state key inputs (only when not authenticated)
+	if m.AuthState != auth.AuthStateCompleted {
+		return m.handleAuthStateKeys(msg)
+	}
 
-		// Handle command palette input first (only in main view)
-		if m.CommandPalette {
-			switch msg.String() {
-			case "esc":
-				// Close command palette
-				m.CommandPalette = false
-				m.CommandInput = ""
-				return m, nil
-			case "enter":
-				// Process command
-				m.CommandPalette = false
-				cmd := strings.TrimSpace(m.CommandInput)
-				m.CommandInput = ""
+	// Handle main application input (only when authenticated)
+	return m.handleMainAppKeys(msg)
+}
 
-				// Process the command
-				if cmd == "" {
-					return m, nil
-				}
+// handleAuthStateKeys handles key input during authentication states
+func (m Model) handleAuthStateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.AuthState {
+	case auth.AuthStateRequired:
+		// Any key starts authentication (quit is handled globally)
+		return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
 
-				m.processCommand(cmd)
-				return m, nil
-			case "backspace":
-				// Remove last character from command input
-				if len(m.CommandInput) > 0 {
-					m.CommandInput = m.CommandInput[:len(m.CommandInput)-1]
-				}
-				return m, nil
-			default:
-				// Add character to command input
-				if len(msg.String()) == 1 {
-					m.CommandInput += msg.String()
-				}
-				return m, nil
-			}
-		}
+	case auth.AuthStateInProgress:
+		// Only quit allowed (handled globally), ignore other keys
+		return m, nil
 
-		// Handle main application input (only when authenticated)
+	case auth.AuthStateFailed:
 		switch msg.String() {
-		case "q", "ctrl+c":
-			return m, tea.Quit
-		case "ctrl+p":
-			// Only allow command palette when authenticated
-			if m.AuthState == auth.AuthStateCompleted {
-				m.CommandPalette = true
-				m.CommandInput = ""
-			}
-			return m, nil
-		case "esc":
-			// Close any open modals (currently just command palette)
-			if m.CommandPalette {
-				m.CommandPalette = false
-				m.CommandInput = ""
-			}
-			return m, nil
+		case "r":
+			// Retry authentication
+			m.AuthError = nil
+			return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
 		}
-	case tea.WindowSizeMsg:
-		// Handle terminal resize
-		m.WindowWidth = msg.Width
-		m.WindowHeight = msg.Height
+		return m, nil
+	}
+	return m, nil
+}
+
+// handleCommandPaletteKeys handles key input when command palette is active
+func (m Model) handleCommandPaletteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		// Close command palette
+		m.CommandPalette = false
+		m.CommandInput = ""
+		return m, nil
+	case "enter":
+		// Process command
+		m.CommandPalette = false
+		cmd := strings.TrimSpace(m.CommandInput)
+		m.CommandInput = ""
+
+		// Process the command
+		if cmd != "" {
+			(&m).processCommand(cmd)
+		}
+		return m, nil
+	case "backspace":
+		// Remove last character from command input
+		if len(m.CommandInput) > 0 {
+			m.CommandInput = m.CommandInput[:len(m.CommandInput)-1]
+		}
+		return m, nil
+	default:
+		// Add character to command input
+		if len(msg.String()) == 1 {
+			m.CommandInput += msg.String()
+		}
+		return m, nil
+	}
+}
+
+// handleMainAppKeys handles key input for the main application
+func (m Model) handleMainAppKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+p":
+		// Only allow command palette when authenticated
+		if m.AuthState == auth.AuthStateCompleted {
+			m.CommandPalette = true
+			m.CommandInput = ""
+		}
+		return m, nil
+	case "esc":
+		// Close any open modals (currently just command palette)
+		if m.CommandPalette {
+			m.CommandPalette = false
+			m.CommandInput = ""
+		}
 		return m, nil
 	}
 	return m, nil

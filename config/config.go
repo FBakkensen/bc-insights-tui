@@ -18,6 +18,9 @@ const (
 	flagEnvironment = "environment"
 	flagFetchSize   = "fetch-size"
 	flagAppInsights = "app-insights-key"
+
+	// Common strings
+	notSetValue = "(not set)"
 )
 
 // OAuth2Config holds OAuth2 authentication settings
@@ -319,7 +322,7 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 		return c.Environment, nil
 	case "applicationInsightsKey":
 		if c.ApplicationInsightsKey == "" {
-			return "(not set)", nil
+			return notSetValue, nil
 		}
 		// Mask the key for display
 		if len(c.ApplicationInsightsKey) > 8 {
@@ -328,17 +331,17 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 		return "***", nil
 	case "oauth2.tenantId":
 		if c.OAuth2.TenantID == "" {
-			return "(not set)", nil
+			return notSetValue, nil
 		}
 		return c.OAuth2.TenantID, nil
 	case "oauth2.clientId":
 		if c.OAuth2.ClientID == "" {
-			return "(not set)", nil
+			return notSetValue, nil
 		}
 		return c.OAuth2.ClientID, nil
 	case "oauth2.scopes":
 		if len(c.OAuth2.Scopes) == 0 {
-			return "(not set)", nil
+			return notSetValue, nil
 		}
 		return strings.Join(c.OAuth2.Scopes, ", "), nil
 	default:
@@ -355,7 +358,7 @@ func (c *Config) ListAllSettings() map[string]string {
 	settings["fetchSize"] = strconv.Itoa(c.LogFetchSize)
 	settings["environment"] = c.Environment
 	if c.ApplicationInsightsKey == "" {
-		settings["applicationInsightsKey"] = "(not set)"
+		settings["applicationInsightsKey"] = notSetValue
 	} else if len(c.ApplicationInsightsKey) > 8 {
 		settings["applicationInsightsKey"] = c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:]
 	} else {
@@ -364,17 +367,17 @@ func (c *Config) ListAllSettings() map[string]string {
 
 	// OAuth2 settings
 	if c.OAuth2.TenantID == "" {
-		settings["oauth2.tenantId"] = "(not set)"
+		settings["oauth2.tenantId"] = notSetValue
 	} else {
 		settings["oauth2.tenantId"] = c.OAuth2.TenantID
 	}
 	if c.OAuth2.ClientID == "" {
-		settings["oauth2.clientId"] = "(not set)"
+		settings["oauth2.clientId"] = notSetValue
 	} else {
 		settings["oauth2.clientId"] = c.OAuth2.ClientID
 	}
 	if len(c.OAuth2.Scopes) == 0 {
-		settings["oauth2.scopes"] = "(not set)"
+		settings["oauth2.scopes"] = notSetValue
 	} else {
 		settings["oauth2.scopes"] = strings.Join(c.OAuth2.Scopes, ", ")
 	}
