@@ -21,7 +21,7 @@ race:
 # Run complete linting suite (your mandatory requirement)
 lint:
 	@echo "🔍 Running quality checks..."
-	go fmt ./... && go vet ./... && golangci-lint run --fast
+	go fmt ./... && go vet ./... && golangci-lint run
 
 # Format code
 fmt:
