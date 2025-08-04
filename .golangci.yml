@@ -1,40 +1,64 @@
+# golangci-lint configuration for bc-insights-tui
+# See https://golangci-lint.run/usage/configuration/
+
 version: "2"
+
 run:
-  modules-download-mode: readonly
+  timeout: 5m
   issues-exit-code: 1
   tests: true
+  modules-download-mode: readonly
+
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+
 linters:
   enable:
-    - dupl
-    - goconst
-    - gocyclo
-    - gosec
-    - misspell
-    - revive
-    - unconvert
+    - errcheck      # Check for unchecked errors
+    - govet         # Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis (includes gosimple, stylecheck)
+    - unused        # Find unused code
+    - dupl          # Find duplicated code
+    - goconst       # Find repeated strings
+    - gocyclo       # Check cyclomatic complexity
+    - misspell      # Check for misspellings
+    - unconvert     # Remove unnecessary conversions
+    - gosec         # Security audit
+    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go
+
   disable:
-    - exhaustruct
-    - nlreturn
-    - varnamelen
-    - wrapcheck
+    - varnamelen    # Variable name length (too strict for TUI)
+    - exhaustruct   # Exhaustive struct initialization (too strict)
+    - wrapcheck     # Wrap errors (can be too verbose)
+    - nlreturn      # New line return (stylistic preference)
+
   settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # Too strict for TUI models
+
+    gocyclo:
+      min-complexity: 15
+
     goconst:
       min-len: 3
       min-occurrences: 3
-    gocyclo:
-      min-complexity: 15
-    govet:
-      disable:
-        - fieldalignment
-      enable-all: true
+
     misspell:
       locale: US
+
     revive:
       rules:
         - name: exported
           disabled: true
         - name: package-comments
           disabled: true
+
   exclusions:
     generated: lax
     presets:
@@ -43,38 +67,48 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters:
-          - dupl
-          - errcheck
+      # Exclude some linters from running on tests files
+      - path: _test\.go
+        linters:
           - gocyclo
+          - errcheck
+          - dupl
           - gosec
-        path: _test\.go
+
+      # Exclude some staticcheck messages for TUI models
       - linters:
           - staticcheck
-        text: 'SA1019:'
-      - linters:
+        text: "SA1019:" # Ignore deprecation warnings for stable APIs
+
+      # Allow embedding in TUI models (common pattern in Bubble Tea)
+      - path: tui/
+        linters:
           - revive
-        path: tui/
-        text: should not use dot imports
+        text: "should not use dot imports"
+
     paths:
       - third_party$
       - builtin$
       - examples$
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  new: false
+
 formatters:
   enable:
     - gofmt
     - gofumpt
     - goimports
+
   settings:
     gofumpt:
       extra-rules: true
+
   exclusions:
     generated: lax
     paths:
       - third_party$
       - builtin$
       - examples$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
