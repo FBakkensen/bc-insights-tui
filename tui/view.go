@@ -58,7 +58,7 @@ func (m Model) renderAuthRequiredView() string {
 	content.WriteString("Application Insights data.\n\n")
 	content.WriteString(instructionStyle.Render("Press any key to start the authentication process..."))
 	content.WriteString("\n\n")
-	content.WriteString("Or press 'q' to quit.")
+	content.WriteString("Or press Ctrl+Q to quit.")
 
 	box := contentStyle.Render(content.String())
 
@@ -114,7 +114,7 @@ func (m Model) renderDeviceCodeView() string {
 	}
 
 	content.WriteString("\n\n")
-	content.WriteString("Press 'q' to cancel and quit.")
+	content.WriteString("Press Ctrl+Q to cancel and quit.")
 
 	box := contentStyle.Render(content.String())
 
@@ -170,7 +170,7 @@ func (m Model) renderAuthFailedView() string {
 	content.WriteString("\n\n")
 	content.WriteString(instructionStyle.Render("Press 'r' to retry authentication"))
 	content.WriteString("\n")
-	content.WriteString("Press 'q' to quit")
+	content.WriteString("Press Ctrl+Q to quit")
 
 	box := contentStyle.Render(content.String())
 

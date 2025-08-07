@@ -618,7 +618,7 @@ func TestView_ConfigurationUpdates(t *testing.T) {
 	// Update configuration
 	model.Config.LogFetchSize = 150
 	model.Config.Environment = "Updated"
-	model.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", model.Config.LogFetchSize)
+	model.HelpText = fmt.Sprintf("Press Ctrl+Q to quit, Ctrl+P for command palette. Log fetch size: %d", model.Config.LogFetchSize)
 
 	// Get updated view
 	updatedOutput := model.View()

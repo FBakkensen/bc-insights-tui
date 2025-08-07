@@ -77,8 +77,8 @@ func TestMain_TUIBasicInteraction(t *testing.T) {
 	cfg := config.NewConfig()
 	model := tui.InitialModel(cfg)
 
-	// Test quit command
-	quitKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+	// Test quit command (now Ctrl+Q instead of 'q')
+	quitKey := tea.KeyMsg{Type: tea.KeyCtrlQ}
 	_, cmd := model.Update(quitKey)
 
 	if cmd == nil {
@@ -270,12 +270,12 @@ func TestMain_GracefulShutdown(t *testing.T) {
 	cfg := config.LoadConfig()
 	model := tui.InitialModel(cfg)
 
-	// Test quit via 'q'
-	quitKey := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+	// Test quit via Ctrl+Q (new quit shortcut)
+	quitKey := tea.KeyMsg{Type: tea.KeyCtrlQ}
 	_, cmd := model.Update(quitKey)
 
 	if cmd == nil {
-		t.Errorf("Expected 'q' to trigger graceful shutdown, got nil")
+		t.Errorf("Expected Ctrl+Q to trigger graceful shutdown, got nil")
 	}
 
 	// Test quit via Ctrl+C

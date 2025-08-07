@@ -123,7 +123,8 @@ Press `Ctrl+P` to open the command palette and use these commands:
 - `↑↓` - Navigate log entries
 - `Enter` - View detailed log entry
 - `Esc` - Close modals/return to main view
-- `Ctrl+C` - Exit application
+- `Ctrl+Q` - Exit application
+- `Ctrl+C` - Force exit application
 
 ## 🔍 Business Central Telemetry Context
 

@@ -13,13 +13,16 @@ func TestUpdate_QuitCommands(t *testing.T) {
 	cfg := config.NewConfig()
 	model := InitialModel(cfg)
 
-	quitCommands := []string{"q", "ctrl+c"}
+	quitCommands := []string{"ctrl+q", "ctrl+c"}
 
 	for _, cmd := range quitCommands {
 		t.Run(cmd, func(t *testing.T) {
-			keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(cmd)}
-			if cmd == "ctrl+c" {
+			var keyMsg tea.KeyMsg
+			switch cmd {
+			case "ctrl+c":
 				keyMsg = tea.KeyMsg{Type: tea.KeyCtrlC}
+			case "ctrl+q":
+				keyMsg = tea.KeyMsg{Type: tea.KeyCtrlQ}
 			}
 
 			newModel, teaCmd := model.Update(keyMsg)
@@ -140,6 +143,40 @@ func TestUpdate_CommandPaletteEscape(t *testing.T) {
 
 	if updatedModel.CommandInput != "" {
 		t.Errorf("Expected CommandInput to be empty after escape, got %q", updatedModel.CommandInput)
+	}
+}
+
+func TestUpdate_CommandPaletteQInput(t *testing.T) {
+	cfg := config.NewConfig()
+	model := InitialModel(cfg)
+	model.CommandPalette = true // Open command palette
+
+	// Test typing 'q' in command palette - should NOT quit the application
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+	newModel, cmd := model.Update(keyMsg)
+
+	if cmd != nil {
+		t.Errorf("Expected no quit command when typing 'q' in command palette, got %v", cmd)
+	}
+
+	updatedModel := newModel.(Model)
+	if updatedModel.CommandInput != "q" {
+		t.Errorf("Expected CommandInput to be 'q', got %q", updatedModel.CommandInput)
+	}
+
+	if !updatedModel.CommandPalette {
+		t.Error("Expected CommandPalette to remain open when typing 'q'")
+	}
+
+	// Test typing more characters to form "query"
+	for _, char := range "uery" {
+		keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(char))}
+		newModel, _ = updatedModel.Update(keyMsg)
+		updatedModel = newModel.(Model)
+	}
+
+	if updatedModel.CommandInput != "query" {
+		t.Errorf("Expected CommandInput to be 'query' after typing full word, got %q", updatedModel.CommandInput)
 	}
 }
 

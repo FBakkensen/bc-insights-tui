@@ -15,7 +15,8 @@ import (
 
 const (
 	// Key combinations
-	quitKey = "ctrl+c"
+	quitKeyCtrlC = "ctrl+c"
+	quitKeyCtrlQ = "ctrl+q"
 
 	// Component focus constants
 	focusEditor  = "editor"
@@ -148,8 +149,8 @@ func (m Model) handleAuthMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKeyMessages processes keyboard input
 func (m Model) handleKeyMessages(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Check for global quit commands first
-	if msg.String() == "q" || msg.String() == quitKey {
+	// Check for global quit commands first - but only Ctrl+Q and Ctrl+C
+	if msg.String() == quitKeyCtrlQ || msg.String() == quitKeyCtrlC {
 		return m, tea.Quit
 	}
 
@@ -347,7 +348,7 @@ func (m *Model) handleSetCommand(args []string) {
 
 	// Update help text if LogFetchSize changed
 	if setting == "fetchSize" {
-		m.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", m.Config.LogFetchSize)
+		m.HelpText = fmt.Sprintf("Press Ctrl+Q to quit, Ctrl+P for command palette. Log fetch size: %d", m.Config.LogFetchSize)
 	}
 }
 
