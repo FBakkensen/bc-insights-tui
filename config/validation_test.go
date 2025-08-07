@@ -351,8 +351,8 @@ func TestListAllSettings(t *testing.T) {
 	}
 
 	// Check that no unexpected settings are present
-	if len(settings) != 6 {
-		t.Errorf("Expected exactly 6 settings, got %d: %v", len(settings), settings)
+	if len(settings) != 10 {
+		t.Errorf("Expected exactly 10 settings, got %d: %v", len(settings), settings)
 	}
 }
 

@@ -16,6 +16,13 @@ import (
 const (
 	// Key combinations
 	quitKey = "ctrl+c"
+
+	// Component focus constants
+	focusEditor  = "editor"
+	focusResults = "results"
+
+	// Key names
+	keyEsc = "esc"
 )
 
 // Message types for authentication flow
@@ -69,6 +76,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authCheckMsg, authInitiateMsg, deviceCodeMsg, authCompleteMsg:
 		return m.handleAuthMessages(msg)
 
+	// Handle KQL editor messages
+	case ExecuteQueryMsg:
+		return m.handleExecuteQueryMsg(msg)
+	case QueryResultMsg:
+		return m.handleQueryResultMsg(msg)
+
 	case tea.KeyMsg:
 		return m.handleKeyMessages(msg)
 
@@ -76,6 +89,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle terminal resize
 		m.WindowWidth = msg.Width
 		m.WindowHeight = msg.Height
+
+		// Update KQL editor component sizes
+		if m.KQLEditorMode {
+			m.updateKQLEditorSizes()
+		}
+
 		return m, nil
 	}
 	return m, nil
@@ -139,6 +158,11 @@ func (m Model) handleKeyMessages(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCommandPaletteKeys(msg)
 	}
 
+	// Handle KQL editor input when in KQL editor mode
+	if m.KQLEditorMode {
+		return m.handleKQLEditorKeys(msg)
+	}
+
 	// Handle authentication state key inputs (only when not authenticated)
 	if m.AuthState != auth.AuthStateCompleted {
 		return m.handleAuthStateKeys(msg)
@@ -174,7 +198,7 @@ func (m Model) handleAuthStateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleCommandPaletteKeys handles key input when command palette is active
 func (m Model) handleCommandPaletteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
+	case keyEsc:
 		// Close command palette
 		m.CommandPalette = false
 		m.CommandInput = ""
@@ -215,7 +239,7 @@ func (m Model) handleMainAppKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.CommandInput = ""
 		}
 		return m, nil
-	case "esc":
+	case keyEsc:
 		// Close any open modals (currently just command palette)
 		if m.CommandPalette {
 			m.CommandPalette = false
@@ -242,6 +266,8 @@ func (m *Model) processCommand(cmd string) {
 		m.handleSetCommand(parts[1:])
 	case "auth":
 		m.handleAuthCommand(parts[1:])
+	case "query":
+		m.handleQueryCommand(parts[1:])
 	default:
 		m.FeedbackMessage = fmt.Sprintf("Unknown command: %s", parts[0])
 		m.FeedbackIsError = true
@@ -323,4 +349,166 @@ func (m *Model) handleSetCommand(args []string) {
 	if setting == "fetchSize" {
 		m.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", m.Config.LogFetchSize)
 	}
+}
+
+// handleQueryCommand processes query-related commands
+func (m *Model) handleQueryCommand(args []string) {
+	// Check authentication first
+	if m.AuthState != auth.AuthStateCompleted {
+		m.FeedbackMessage = "❌ Authentication required for query operations"
+		m.FeedbackIsError = true
+		return
+	}
+
+	if len(args) == 0 {
+		// Open KQL editor mode
+		m.KQLEditorMode = true
+		m.FocusedComponent = focusEditor
+		m.updateKQLEditorSizes()
+		m.KQLEditor.Focus()
+		m.ResultsTable.Blur()
+		m.FeedbackMessage = "✓ KQL Editor opened. Press F5 to execute queries, Esc to exit"
+		return
+	}
+
+	switch args[0] {
+	case "run":
+		if !m.KQLEditorMode {
+			m.FeedbackMessage = "❌ KQL editor is not open. Use 'query' command to open it first"
+			m.FeedbackIsError = true
+			return
+		}
+		// Execute current query (same as F5)
+		query := m.KQLEditor.GetContent()
+		if strings.TrimSpace(query) == "" {
+			m.FeedbackMessage = "❌ No query to execute"
+			m.FeedbackIsError = true
+			return
+		}
+		// This will be handled by the handleExecuteQueryMsg function
+	case "clear":
+		if !m.KQLEditorMode {
+			m.FeedbackMessage = "❌ KQL editor is not open. Use 'query' command to open it first"
+			m.FeedbackIsError = true
+			return
+		}
+		m.KQLEditor.SetContent("")
+		m.FeedbackMessage = "✓ Query editor cleared"
+	case "history":
+		count := m.QueryHistory.Count()
+		if count == 0 {
+			m.FeedbackMessage = "No queries in history"
+		} else {
+			m.FeedbackMessage = fmt.Sprintf("Query history: %d queries. Use Ctrl+↑/↓ in editor to browse", count)
+		}
+	default:
+		m.FeedbackMessage = fmt.Sprintf("Unknown query command: %s. Available: run, clear, history", args[0])
+		m.FeedbackIsError = true
+	}
+}
+
+// handleKQLEditorKeys handles key input when KQL editor is active
+func (m Model) handleKQLEditorKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyEsc:
+		// Exit KQL editor mode
+		m.KQLEditorMode = false
+		m.KQLEditor.Blur()
+		m.ResultsTable.Blur()
+		return m, nil
+	case "tab":
+		// Switch focus between editor and results
+		if m.FocusedComponent == focusEditor && m.ResultsTable.HasResults() {
+			m.FocusedComponent = focusResults
+			m.KQLEditor.Blur()
+			m.ResultsTable.Focus()
+		} else {
+			m.FocusedComponent = focusEditor
+			m.KQLEditor.Focus()
+			m.ResultsTable.Blur()
+		}
+		return m, nil
+	}
+
+	// Forward other keys to the focused component
+	var cmd tea.Cmd
+	switch m.FocusedComponent {
+	case focusEditor:
+		m.KQLEditor, cmd = m.KQLEditor.Update(msg)
+	case focusResults:
+		m.ResultsTable, cmd = m.ResultsTable.Update(msg)
+	}
+
+	return m, cmd
+}
+
+// handleExecuteQueryMsg handles query execution requests
+func (m Model) handleExecuteQueryMsg(msg ExecuteQueryMsg) (tea.Model, tea.Cmd) {
+	query := strings.TrimSpace(msg.Query)
+	if query == "" {
+		m.KQLEditor.SetError("Query cannot be empty")
+		return m, nil
+	}
+
+	// Clear any previous errors
+	m.KQLEditor.ClearError()
+	m.KQLEditor.SetExecuting(true)
+
+	// Execute query with configured timeout
+	timeout := time.Duration(m.Config.QueryTimeoutSeconds) * time.Second
+	return m, m.QueryExecutor.ExecuteQuery(query, timeout)
+}
+
+// handleQueryResultMsg handles query execution results
+func (m Model) handleQueryResultMsg(msg QueryResultMsg) (tea.Model, tea.Cmd) {
+	m.KQLEditor.SetExecuting(false)
+
+	if msg.Error != nil {
+		// Display error
+		errorMsg := formatQueryError(msg.Error)
+		m.KQLEditor.SetError(errorMsg)
+		m.ResultsTable.ClearResults()
+	} else {
+		// Display results
+		m.KQLEditor.ClearError()
+		m.ResultsTable.SetResults(msg.Results)
+
+		// Add to history if successful
+		if msg.Results != nil {
+			m.QueryHistory.AddEntry(msg.Query, true, msg.Results.RowCount, msg.Duration)
+		}
+
+		// Switch focus to results if we have data
+		if msg.Results != nil && msg.Results.RowCount > 0 {
+			m.FocusedComponent = focusResults
+			m.KQLEditor.Blur()
+			m.ResultsTable.Focus()
+		}
+	}
+
+	return m, nil
+}
+
+// updateKQLEditorSizes updates the sizes of KQL editor components based on window size
+func (m *Model) updateKQLEditorSizes() {
+	if m.WindowWidth <= 0 || m.WindowHeight <= 0 {
+		return
+	}
+
+	// Calculate panel heights based on configured ratio
+	totalHeight := m.WindowHeight - 4 // Account for header, footer, borders
+	editorHeight := int(float32(totalHeight) * m.Config.EditorPanelRatio)
+	resultsHeight := totalHeight - editorHeight - 2 // Account for borders between panels
+
+	// Ensure minimum heights
+	if editorHeight < 5 {
+		editorHeight = 5
+	}
+	if resultsHeight < 5 {
+		resultsHeight = 5
+	}
+
+	// Update component sizes
+	m.KQLEditor.SetSize(m.WindowWidth-4, editorHeight)
+	m.ResultsTable.SetSize(m.WindowWidth-4, resultsHeight)
 }

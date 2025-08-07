@@ -37,6 +37,10 @@ type Config struct {
 	Environment            string        `json:"environment" yaml:"environment"`
 	ApplicationInsightsKey string        `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
 	OAuth2                 OAuth2Config  `json:"oauth2" yaml:"oauth2"`
+	QueryHistoryMaxEntries int           `json:"queryHistoryMaxEntries" yaml:"queryHistoryMaxEntries"`
+	QueryTimeoutSeconds    int           `json:"queryTimeoutSeconds" yaml:"queryTimeoutSeconds"`
+	QueryHistoryFile       string        `json:"queryHistoryFile" yaml:"queryHistoryFile"`
+	EditorPanelRatio       float32       `json:"editorPanelRatio" yaml:"editorPanelRatio"`
 }
 
 // NewConfig creates a new Config with default values and initialized mutex
@@ -51,6 +55,10 @@ func NewConfig() Config {
 			ClientID: "3b065ad6-067e-41f2-8cf7-19ddb0548a99",
 			Scopes:   []string{"https://api.applicationinsights.io/Data.Read"},
 		},
+		QueryHistoryMaxEntries: 100,
+		QueryTimeoutSeconds:    30,
+		QueryHistoryFile:       ".bc-insights-query-history.json",
+		EditorPanelRatio:       0.4,
 	}
 }
 
@@ -173,6 +181,26 @@ func applyEnvironmentVariables(cfg *Config) {
 			cfg.OAuth2.Scopes[i] = strings.TrimSpace(scope)
 		}
 	}
+
+	// KQL Editor environment variables
+	if val := os.Getenv("BCINSIGHTS_QUERY_HISTORY_MAX_ENTRIES"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			cfg.QueryHistoryMaxEntries = parsed
+		}
+	}
+	if val := os.Getenv("BCINSIGHTS_QUERY_TIMEOUT_SECONDS"); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			cfg.QueryTimeoutSeconds = parsed
+		}
+	}
+	if _, exists := os.LookupEnv("BCINSIGHTS_QUERY_HISTORY_FILE"); exists {
+		cfg.QueryHistoryFile = os.Getenv("BCINSIGHTS_QUERY_HISTORY_FILE")
+	}
+	if val := os.Getenv("BCINSIGHTS_EDITOR_PANEL_RATIO"); val != "" {
+		if parsed, err := strconv.ParseFloat(val, 32); err == nil && parsed > 0 && parsed < 1 {
+			cfg.EditorPanelRatio = float32(parsed)
+		}
+	}
 }
 
 // applyCommandLineFlags applies command line flag overrides
@@ -253,6 +281,20 @@ func mergeConfig(base, file *Config) {
 	if len(file.OAuth2.Scopes) > 0 {
 		base.OAuth2.Scopes = file.OAuth2.Scopes
 	}
+
+	// Merge KQL Editor configuration
+	if file.QueryHistoryMaxEntries > 0 {
+		base.QueryHistoryMaxEntries = file.QueryHistoryMaxEntries
+	}
+	if file.QueryTimeoutSeconds > 0 {
+		base.QueryTimeoutSeconds = file.QueryTimeoutSeconds
+	}
+	if file.QueryHistoryFile != "" {
+		base.QueryHistoryFile = file.QueryHistoryFile
+	}
+	if file.EditorPanelRatio > 0 && file.EditorPanelRatio < 1 {
+		base.EditorPanelRatio = file.EditorPanelRatio
+	}
 }
 
 // ValidateAndUpdateSetting validates and updates a configuration setting
@@ -304,6 +346,33 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 			}
 		}
 		c.OAuth2.Scopes = scopes
+	case "queryHistoryMaxEntries":
+		trimmed := strings.TrimSpace(value)
+		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
+			return fmt.Errorf("queryHistoryMaxEntries must be a positive integer, got: %s", value)
+		} else {
+			c.QueryHistoryMaxEntries = parsed
+		}
+	case "queryTimeoutSeconds":
+		trimmed := strings.TrimSpace(value)
+		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
+			return fmt.Errorf("queryTimeoutSeconds must be a positive integer, got: %s", value)
+		} else {
+			c.QueryTimeoutSeconds = parsed
+		}
+	case "queryHistoryFile":
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return fmt.Errorf("queryHistoryFile cannot be empty")
+		}
+		c.QueryHistoryFile = trimmed
+	case "editorPanelRatio":
+		trimmed := strings.TrimSpace(value)
+		if parsed, err := strconv.ParseFloat(trimmed, 32); err != nil || parsed <= 0 || parsed >= 1 {
+			return fmt.Errorf("editorPanelRatio must be a decimal between 0 and 1, got: %s", value)
+		} else {
+			c.EditorPanelRatio = float32(parsed)
+		}
 	default:
 		return fmt.Errorf("unknown setting: %s", name)
 	}
@@ -344,6 +413,17 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 			return notSetValue, nil
 		}
 		return strings.Join(c.OAuth2.Scopes, ", "), nil
+	case "queryHistoryMaxEntries":
+		return strconv.Itoa(c.QueryHistoryMaxEntries), nil
+	case "queryTimeoutSeconds":
+		return strconv.Itoa(c.QueryTimeoutSeconds), nil
+	case "queryHistoryFile":
+		if c.QueryHistoryFile == "" {
+			return notSetValue, nil
+		}
+		return c.QueryHistoryFile, nil
+	case "editorPanelRatio":
+		return fmt.Sprintf("%.2f", c.EditorPanelRatio), nil
 	default:
 		return "", fmt.Errorf("unknown setting: %s", name)
 	}
@@ -381,6 +461,16 @@ func (c *Config) ListAllSettings() map[string]string {
 	} else {
 		settings["oauth2.scopes"] = strings.Join(c.OAuth2.Scopes, ", ")
 	}
+
+	// KQL Editor settings
+	settings["queryHistoryMaxEntries"] = strconv.Itoa(c.QueryHistoryMaxEntries)
+	settings["queryTimeoutSeconds"] = strconv.Itoa(c.QueryTimeoutSeconds)
+	if c.QueryHistoryFile == "" {
+		settings["queryHistoryFile"] = notSetValue
+	} else {
+		settings["queryHistoryFile"] = c.QueryHistoryFile
+	}
+	settings["editorPanelRatio"] = fmt.Sprintf("%.2f", c.EditorPanelRatio)
 
 	return settings
 }

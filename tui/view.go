@@ -21,6 +21,9 @@ func (m Model) View() string {
 		return m.renderAuthFailedView()
 	case auth.AuthStateCompleted:
 		// Continue to main view
+		if m.KQLEditorMode {
+			return m.renderKQLEditorView()
+		}
 	case auth.AuthStateUnknown:
 		// Continue to main view (for now)
 	}
@@ -353,6 +356,105 @@ func (m Model) renderMainView() string {
 			// Fallback if screen is too small
 			screen.WriteString("\n")
 			screen.WriteString(palette)
+		}
+	}
+
+	return screen.String() + "\n"
+}
+
+// renderKQLEditorView renders the KQL editor interface
+func (m Model) renderKQLEditorView() string {
+	var (
+		headerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("24")).
+				Bold(true).
+				Padding(0, 1).
+				Width(m.WindowWidth)
+
+		footerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("24")).
+				Padding(0, 1).
+				Width(m.WindowWidth)
+	)
+
+	// Build header
+	headerLeft := fmt.Sprintf("bc-insights-tui %s - KQL Editor", AppVersion)
+	headerRight := "F5: Execute | Tab: Switch Focus | Esc: Exit"
+	headerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(headerLeft)-len(headerRight)-3))
+	header := headerStyle.Render(headerLeft + " | " + headerRight + headerSpacer)
+
+	// Calculate component sizes
+	totalHeight := m.WindowHeight - 2 // Header and footer
+	editorHeight := int(float32(totalHeight-2) * m.Config.EditorPanelRatio)
+	resultsHeight := totalHeight - editorHeight - 2
+
+	// Ensure minimum heights
+	if editorHeight < 5 {
+		editorHeight = 5
+	}
+	if resultsHeight < 5 {
+		resultsHeight = 5
+	}
+
+	// Update component sizes if needed
+	m.KQLEditor.SetSize(m.WindowWidth, editorHeight)
+	m.ResultsTable.SetSize(m.WindowWidth, resultsHeight)
+
+	// Render components
+	editorView := m.KQLEditor.View()
+	resultsView := m.ResultsTable.View()
+
+	// Build footer
+	footerLeft := "[F5] Execute Query | [Tab] Switch Focus | [Esc] Exit Editor"
+	footerRight := fmt.Sprintf("Focus: %s", strings.Title(m.FocusedComponent))
+	footerSpacer := strings.Repeat(" ", max(0, m.WindowWidth-len(footerLeft)-len(footerRight)-4))
+	footer := footerStyle.Render(footerLeft + footerSpacer + footerRight)
+
+	// Combine all parts
+	var screen strings.Builder
+	screen.WriteString(header)
+	screen.WriteString("\n")
+	screen.WriteString(editorView)
+	screen.WriteString("\n")
+	screen.WriteString(resultsView)
+	screen.WriteString("\n")
+	screen.WriteString(footer)
+
+	// Handle command palette overlay (same as main view)
+	if m.CommandPalette {
+		overlayWidth := min(60, m.WindowWidth-10)
+
+		paletteStyle := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("226")).
+			Background(lipgloss.Color("235")).
+			Padding(1, 2).
+			Width(overlayWidth).
+			Align(lipgloss.Center)
+
+		var paletteContent strings.Builder
+		paletteContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("226")).Render("Command Palette"))
+		paletteContent.WriteString("\n")
+		paletteContent.WriteString("Examples: 'query clear', 'query history', 'set queryTimeoutSeconds=60'\n")
+		paletteContent.WriteString("Press Esc to close, Enter to execute\n\n")
+		paletteContent.WriteString("> " + m.CommandInput)
+
+		palette := paletteStyle.Render(paletteContent.String())
+
+		// Overlay on screen
+		lines := strings.Split(screen.String(), "\n")
+		if len(lines) > 7 {
+			startLine := len(lines)/2 - 2
+			paletteLines := strings.Split(palette, "\n")
+			for i, paletteLine := range paletteLines {
+				if startLine+i < len(lines) && startLine+i >= 0 {
+					lines[startLine+i] = paletteLine
+				}
+			}
+			screen.Reset()
+			screen.WriteString(strings.Join(lines, "\n"))
 		}
 	}
 
