@@ -20,7 +20,13 @@ This command runs the full pipeline: lint, race tests, and build.
 
 **Linting Configuration**: `.golangci.yml` includes strict rules with exceptions for TUI patterns (disabled `fieldalignment` for TUI models, allows embedding in TUI components).
 
-**Environment Setup**: `.github/workflows/copilot-setup-steps.yml` configures the Copilot coding agent environment with golangci-lint and Go dependencies pre-installed.
+**Environment Setup**: `.github/workflows/copilot-setup-steps.yml` configures the Copilot coding agent environment with golangci-lint v2.3.1 and Go 1.24 pre-installed.
+
+### ⚠️ MANDATORY: Go Code Standards
+Follow the comprehensive Go instructions in `.github/instructions/go.instructions.md`. Key patterns specific to this project:
+- **Thread-safe Config**: Use `sync.RWMutex` for configuration changes (see `config/config.go`)
+- **OAuth2 Token Security**: Store tokens in OS keyring via `github.com/zalando/go-keyring` (see `auth/authenticator.go`)
+- **Bubble Tea Async**: Use proper `tea.Cmd` patterns for long-running operations like auth polling
 
 ### ⚠️ MANDATORY: Documentation Research
 **BEFORE implementing any feature or fixing configuration issues**, you MUST use Context7 MCP to get up-to-date documentation:
@@ -37,7 +43,7 @@ This command runs the full pipeline: lint, race tests, and build.
 
 ### Phase-Based Development
 1. ✅ **Phase 1**: Basic TUI skeleton and configuration (COMPLETE)
-2. 🚧 **Phase 2**: Azure OAuth2 authentication with device flow (auth/authenticator.go placeholder)
+2. 🚧 **Phase 2**: Azure OAuth2 authentication with device flow (auth/authenticator.go implementation exists)
 3. 🚧 **Phase 3**: Application Insights integration (appinsights/client.go placeholder)
 4. 🚧 **Phase 4**: Advanced features (KQL editor, saved queries, dynamic columns)
 5. 🚧 **Phase 5**: AI-powered KQL generation (ai/assistant.go placeholder)
@@ -46,7 +52,7 @@ This command runs the full pipeline: lint, race tests, and build.
 
 This is a Go-based Terminal User Interface for Azure Application Insights, specifically designed for Business Central developers. The project uses the Charm Bracelet ecosystem (Bubble Tea, Lip Gloss, Bubbles) for TUI components.
 
-**Current State**: Phase 1 complete (basic TUI skeleton). The project has a working Bubble Tea foundation with configuration loading, but auth, API client, and AI integration are placeholder files.
+**Current State**: Phase 1 complete (basic TUI skeleton). The project has a working Bubble Tea foundation with configuration loading and complete OAuth2 device flow implementation ready for integration.
 
 ## Architecture Principles
 
@@ -61,24 +67,32 @@ The UI is built around a keyboard-driven command palette (Ctrl+P) rather than tr
 
 ### 3. Bubble Tea MVC Pattern
 Follow the established three-file pattern in `tui/`:
-- `model.go` - State and data structures
-- `update.go` - Event handling and state transitions
-- `view.go` - Rendering logic
+- `model.go` - State and data structures with authentication state
+- `update.go` - Event handling with async `tea.Cmd` patterns for auth flow
+- `view.go` - Rendering logic with state-aware UI
 
-Current `Model` struct includes `Config` field for accessing settings.
+**Key Implementation Details**:
+- `Model` struct includes `Config`, `AuthState`, and `Authenticator` fields
+- Authentication commands use context with timeouts (30s for device flow, 15m for polling)
+- Command palette uses string input with real-time character handling
+- Thread-safe config updates via `Config.ValidateAndUpdateSetting()`
 
 ## Package Structure & Responsibilities
 
 ```
 main.go              # Entry point: config loading → TUI initialization
 tui/                 # Bubble Tea UI components (model.go, update.go, view.go)
-auth/                # OAuth2 Device Authorization Flow (placeholder)
+auth/                # Complete OAuth2 Device Authorization Flow implementation
 appinsights/         # Application Insights API client (placeholder)
 ai/                  # AI service integration for KQL generation (placeholder)
-config/              # Environment-based configuration
+config/              # Environment-based configuration with thread-safety
 ```
 
-**Configuration Pattern**: Environment variables with fallback defaults (see `config.LoadConfig()`). Example: `LOG_FETCH_SIZE` env var with default of 50.
+**Configuration Precedence** (highest to lowest):
+1. Command line flags (`--fetch-size`, `--environment`, `--app-insights-key`)
+2. Environment variables (`LOG_FETCH_SIZE`, `BCINSIGHTS_*`)
+3. Configuration files (`config.json`, `.bc-insights-tui.json`)
+4. Default values
 
 ## Business Central Telemetry Context
 
@@ -100,6 +114,13 @@ Example event structure:
 
 ## Implementation Requirements
 
+### Authentication Flow (Implemented)
+The OAuth2 device flow is fully implemented in `auth/authenticator.go`:
+- Device code request → User authentication → Token polling → Secure storage
+- Tokens stored in OS keyring using `github.com/zalando/go-keyring`
+- Automatic token refresh with context timeouts
+- State management: `AuthStateUnknown`, `AuthStateRequired`, `AuthStateInProgress`, `AuthStateCompleted`, `AuthStateFailed`
+
 ### Error Handling
 All authentication and API errors must be user-friendly with actionable guidance:
 - ❌ "Authentication failed"
@@ -117,5 +138,10 @@ All authentication and API errors must be user-friendly with actionable guidance
 - Modal overlay for log details (preserves background context)
 - Command palette input with real-time feedback
 - Settings changes via `set` commands with confirmation
+
+**Command Examples**:
+- `set fetchSize=100` - Updates log fetch size with validation
+- `auth logout` - Clears stored tokens and resets auth state
+- `auth` - Shows current authentication status
 
 When implementing new features, prioritize the command palette workflow and ensure dynamic handling of Business Central's flexible telemetry schema.
