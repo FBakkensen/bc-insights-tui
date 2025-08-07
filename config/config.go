@@ -19,6 +19,22 @@ const (
 	flagFetchSize   = "fetch-size"
 	flagAppInsights = "app-insights-key"
 
+	// Setting names - Basic
+	settingFetchSize           = "fetchSize"
+	settingEnvironment         = "environment"
+	settingApplicationInsights = "applicationInsightsKey"
+
+	// Setting names - OAuth2
+	settingOAuth2TenantID = "oauth2.tenantId"
+	settingOAuth2ClientID = "oauth2.clientId"
+	settingOAuth2Scopes   = "oauth2.scopes"
+
+	// Setting names - KQL Editor
+	settingQueryHistoryMaxEntries = "queryHistoryMaxEntries"
+	settingQueryTimeoutSeconds    = "queryTimeoutSeconds"
+	settingQueryHistoryFile       = "queryHistoryFile"
+	settingEditorPanelRatio       = "editorPanelRatio"
+
 	// Common strings
 	notSetValue = "(not set)"
 )
@@ -154,6 +170,13 @@ func loadConfigFromFileIfExists(cfg *Config, configFile string) {
 
 // applyEnvironmentVariables applies environment variable overrides
 func applyEnvironmentVariables(cfg *Config) {
+	applyBasicEnvVars(cfg)
+	applyOAuth2EnvVars(cfg)
+	applyKQLEditorEnvVars(cfg)
+}
+
+// applyBasicEnvVars applies basic configuration environment variables
+func applyBasicEnvVars(cfg *Config) {
 	if val := os.Getenv("LOG_FETCH_SIZE"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
 			cfg.LogFetchSize = parsed
@@ -165,8 +188,10 @@ func applyEnvironmentVariables(cfg *Config) {
 	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
 		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
 	}
+}
 
-	// OAuth2 environment variables
+// applyOAuth2EnvVars applies OAuth2 configuration environment variables
+func applyOAuth2EnvVars(cfg *Config) {
 	if _, exists := os.LookupEnv("BCINSIGHTS_OAUTH2_TENANT_ID"); exists {
 		cfg.OAuth2.TenantID = os.Getenv("BCINSIGHTS_OAUTH2_TENANT_ID")
 	}
@@ -181,8 +206,10 @@ func applyEnvironmentVariables(cfg *Config) {
 			cfg.OAuth2.Scopes[i] = strings.TrimSpace(scope)
 		}
 	}
+}
 
-	// KQL Editor environment variables
+// applyKQLEditorEnvVars applies KQL Editor configuration environment variables
+func applyKQLEditorEnvVars(cfg *Config) {
 	if val := os.Getenv("BCINSIGHTS_QUERY_HISTORY_MAX_ENTRIES"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
 			cfg.QueryHistoryMaxEntries = parsed
@@ -302,8 +329,58 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// Try basic settings first
+	if c.isBasicSetting(name) {
+		return c.validateBasicSetting(name, value)
+	}
+
+	// Try OAuth2 settings
+	if c.isOAuth2Setting(name) {
+		return c.validateOAuth2Setting(name, value)
+	}
+
+	// Try KQL Editor settings
+	if c.isKQLEditorSetting(name) {
+		return c.validateKQLEditorSetting(name, value)
+	}
+
+	return fmt.Errorf("unknown setting: %s", name)
+}
+
+// isBasicSetting checks if the setting name is a basic configuration setting
+func (c *Config) isBasicSetting(name string) bool {
 	switch name {
-	case "fetchSize":
+	case settingFetchSize, settingEnvironment, settingApplicationInsights:
+		return true
+	default:
+		return false
+	}
+}
+
+// isOAuth2Setting checks if the setting name is an OAuth2 configuration setting
+func (c *Config) isOAuth2Setting(name string) bool {
+	switch name {
+	case settingOAuth2TenantID, settingOAuth2ClientID, settingOAuth2Scopes:
+		return true
+	default:
+		return false
+	}
+}
+
+// isKQLEditorSetting checks if the setting name is a KQL Editor configuration setting
+func (c *Config) isKQLEditorSetting(name string) bool {
+	switch name {
+	case settingQueryHistoryMaxEntries, settingQueryTimeoutSeconds, settingQueryHistoryFile, settingEditorPanelRatio:
+		return true
+	default:
+		return false
+	}
+}
+
+// validateBasicSetting validates and updates basic configuration settings
+func (c *Config) validateBasicSetting(name, value string) error {
+	switch name {
+	case settingFetchSize:
 		// Trim whitespace for parsing
 		trimmed := strings.TrimSpace(value)
 		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
@@ -311,29 +388,38 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 		} else {
 			c.LogFetchSize = parsed
 		}
-	case "environment":
+	case settingEnvironment:
 		// Trim whitespace and check if empty (but preserve original value if valid)
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			return fmt.Errorf("environment cannot be empty")
 		}
 		c.Environment = value // Use original value, not trimmed
-	case "applicationInsightsKey":
+	case settingApplicationInsights:
 		// Allow empty for clearing the key
 		c.ApplicationInsightsKey = value
-	case "oauth2.tenantId":
+	default:
+		return fmt.Errorf("unknown basic setting: %s", name)
+	}
+	return nil
+}
+
+// validateOAuth2Setting validates and updates OAuth2 configuration settings
+func (c *Config) validateOAuth2Setting(name, value string) error {
+	switch name {
+	case settingOAuth2TenantID:
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			return fmt.Errorf("oauth2.tenantId cannot be empty")
 		}
 		c.OAuth2.TenantID = trimmed
-	case "oauth2.clientId":
+	case settingOAuth2ClientID:
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			return fmt.Errorf("oauth2.clientId cannot be empty")
 		}
 		c.OAuth2.ClientID = trimmed
-	case "oauth2.scopes":
+	case settingOAuth2Scopes:
 		// Split scopes by comma and trim whitespace
 		if value == "" {
 			return fmt.Errorf("oauth2.scopes cannot be empty")
@@ -346,27 +432,36 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 			}
 		}
 		c.OAuth2.Scopes = scopes
-	case "queryHistoryMaxEntries":
+	default:
+		return fmt.Errorf("unknown oauth2 setting: %s", name)
+	}
+	return nil
+}
+
+// validateKQLEditorSetting validates and updates KQL Editor configuration settings
+func (c *Config) validateKQLEditorSetting(name, value string) error {
+	switch name {
+	case settingQueryHistoryMaxEntries:
 		trimmed := strings.TrimSpace(value)
 		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
 			return fmt.Errorf("queryHistoryMaxEntries must be a positive integer, got: %s", value)
 		} else {
 			c.QueryHistoryMaxEntries = parsed
 		}
-	case "queryTimeoutSeconds":
+	case settingQueryTimeoutSeconds:
 		trimmed := strings.TrimSpace(value)
 		if parsed, err := strconv.Atoi(trimmed); err != nil || parsed <= 0 {
 			return fmt.Errorf("queryTimeoutSeconds must be a positive integer, got: %s", value)
 		} else {
 			c.QueryTimeoutSeconds = parsed
 		}
-	case "queryHistoryFile":
+	case settingQueryHistoryFile:
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
 			return fmt.Errorf("queryHistoryFile cannot be empty")
 		}
 		c.QueryHistoryFile = trimmed
-	case "editorPanelRatio":
+	case settingEditorPanelRatio:
 		trimmed := strings.TrimSpace(value)
 		if parsed, err := strconv.ParseFloat(trimmed, 32); err != nil || parsed <= 0 || parsed >= 1 {
 			return fmt.Errorf("editorPanelRatio must be a decimal between 0 and 1, got: %s", value)
@@ -374,7 +469,7 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 			c.EditorPanelRatio = float32(parsed)
 		}
 	default:
-		return fmt.Errorf("unknown setting: %s", name)
+		return fmt.Errorf("unknown kql editor setting: %s", name)
 	}
 	return nil
 }
@@ -384,12 +479,32 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// Try basic settings first
+	if c.isBasicSetting(name) {
+		return c.getBasicSettingValue(name)
+	}
+
+	// Try OAuth2 settings
+	if c.isOAuth2Setting(name) {
+		return c.getOAuth2SettingValue(name)
+	}
+
+	// Try KQL Editor settings
+	if c.isKQLEditorSetting(name) {
+		return c.getKQLEditorSettingValue(name)
+	}
+
+	return "", fmt.Errorf("unknown setting: %s", name)
+}
+
+// getBasicSettingValue returns the value of basic configuration settings
+func (c *Config) getBasicSettingValue(name string) (string, error) {
 	switch name {
-	case "fetchSize":
+	case settingFetchSize:
 		return strconv.Itoa(c.LogFetchSize), nil
-	case "environment":
+	case settingEnvironment:
 		return c.Environment, nil
-	case "applicationInsightsKey":
+	case settingApplicationInsights:
 		if c.ApplicationInsightsKey == "" {
 			return notSetValue, nil
 		}
@@ -398,34 +513,50 @@ func (c *Config) GetSettingValue(name string) (string, error) {
 			return c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:], nil
 		}
 		return "***", nil
-	case "oauth2.tenantId":
+	default:
+		return "", fmt.Errorf("unknown basic setting: %s", name)
+	}
+}
+
+// getOAuth2SettingValue returns the value of OAuth2 configuration settings
+func (c *Config) getOAuth2SettingValue(name string) (string, error) {
+	switch name {
+	case settingOAuth2TenantID:
 		if c.OAuth2.TenantID == "" {
 			return notSetValue, nil
 		}
 		return c.OAuth2.TenantID, nil
-	case "oauth2.clientId":
+	case settingOAuth2ClientID:
 		if c.OAuth2.ClientID == "" {
 			return notSetValue, nil
 		}
 		return c.OAuth2.ClientID, nil
-	case "oauth2.scopes":
+	case settingOAuth2Scopes:
 		if len(c.OAuth2.Scopes) == 0 {
 			return notSetValue, nil
 		}
 		return strings.Join(c.OAuth2.Scopes, ", "), nil
-	case "queryHistoryMaxEntries":
+	default:
+		return "", fmt.Errorf("unknown oauth2 setting: %s", name)
+	}
+}
+
+// getKQLEditorSettingValue returns the value of KQL Editor configuration settings
+func (c *Config) getKQLEditorSettingValue(name string) (string, error) {
+	switch name {
+	case settingQueryHistoryMaxEntries:
 		return strconv.Itoa(c.QueryHistoryMaxEntries), nil
-	case "queryTimeoutSeconds":
+	case settingQueryTimeoutSeconds:
 		return strconv.Itoa(c.QueryTimeoutSeconds), nil
-	case "queryHistoryFile":
+	case settingQueryHistoryFile:
 		if c.QueryHistoryFile == "" {
 			return notSetValue, nil
 		}
 		return c.QueryHistoryFile, nil
-	case "editorPanelRatio":
+	case settingEditorPanelRatio:
 		return fmt.Sprintf("%.2f", c.EditorPanelRatio), nil
 	default:
-		return "", fmt.Errorf("unknown setting: %s", name)
+		return "", fmt.Errorf("unknown kql editor setting: %s", name)
 	}
 }
 
