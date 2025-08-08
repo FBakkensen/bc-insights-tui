@@ -43,6 +43,9 @@ func TestHasValidToken_NoToken(t *testing.T) {
 
 	auth := NewAuthenticator(cfg)
 
+	// Ensure a clean state: remove any pre-existing token from previous runs or environment
+	_ = auth.ClearToken()
+
 	// Should return false when no token is stored
 	if auth.HasValidToken() {
 		t.Error("Expected HasValidToken to return false when no token is stored")

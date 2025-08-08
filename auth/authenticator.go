@@ -5,17 +5,23 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/FBakkensen/bc-insights-tui/config"
+	"github.com/FBakkensen/bc-insights-tui/logging"
 	"github.com/zalando/go-keyring"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/microsoft"
 )
+
+// ErrNoStoredToken indicates no stored token was found
+var ErrNoStoredToken = errors.New("no stored token found")
 
 const (
 	// Service name for keyring storage
@@ -71,16 +77,23 @@ func NewAuthenticator(cfg config.OAuth2Config) *Authenticator {
 
 // HasValidToken checks if there's a valid stored token
 func (a *Authenticator) HasValidToken() bool {
+	logging.Debug("Checking for valid stored token")
 	token, err := a.getStoredToken()
 	if err != nil {
+		logging.Debug("No stored token found", "error", err.Error())
 		return false
 	}
-	return token.Valid()
+
+	isValid := token.Valid()
+	logging.Debug("Token validation result", "valid", strconv.FormatBool(isValid))
+	return isValid
 }
 
 // InitiateDeviceFlow starts the device authorization flow
 func (a *Authenticator) InitiateDeviceFlow(ctx context.Context) (*DeviceCodeResponse, error) {
+	logging.Info("Initiating device authorization flow")
 	deviceEndpoint := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/devicecode", a.config.TenantID)
+	logging.Debug("Device endpoint", "url", deviceEndpoint)
 
 	data := url.Values{}
 	data.Set("client_id", a.config.ClientID)
@@ -185,74 +198,101 @@ func (a *Authenticator) pollOnce(ctx context.Context, tokenEndpoint, deviceCode 
 
 // SaveTokenSecurely stores the token in the OS credential manager
 func (a *Authenticator) SaveTokenSecurely(token *oauth2.Token) error {
+	logging.Info("Saving authentication token securely")
 	tokenJSON, err := json.Marshal(token)
 	if err != nil {
+		logging.Error("Failed to marshal token", "error", err.Error())
 		return fmt.Errorf("failed to marshal token: %w", err)
 	}
 
 	if err := keyring.Set(serviceName, tokenKey, string(tokenJSON)); err != nil {
+		logging.Error("Failed to store token in keyring", "error", err.Error())
 		return fmt.Errorf("failed to store token in keyring: %w", err)
 	}
 
+	logging.Info("Token saved successfully to secure storage")
 	return nil
 }
 
 // getStoredToken retrieves the stored token from the OS credential manager
 func (a *Authenticator) getStoredToken() (*oauth2.Token, error) {
+	logging.Debug("Retrieving stored token from keyring")
 	tokenJSON, err := keyring.Get(serviceName, tokenKey)
 	if err != nil {
+		if err == keyring.ErrNotFound {
+			logging.Info("No stored token found in keyring")
+			return nil, ErrNoStoredToken
+		}
+		logging.Error("Failed to retrieve token from keyring", "error", err.Error())
 		return nil, fmt.Errorf("failed to get token from keyring: %w", err)
 	}
 
 	var token oauth2.Token
 	if err := json.Unmarshal([]byte(tokenJSON), &token); err != nil {
+		logging.Error("Failed to unmarshal stored token", "error", err.Error())
 		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
 	}
 
+	logging.Debug("Successfully retrieved and parsed stored token")
 	return &token, nil
 }
 
 // RefreshTokenIfNeeded refreshes the token if it's expired
 func (a *Authenticator) RefreshTokenIfNeeded(ctx context.Context) (*oauth2.Token, error) {
+	logging.Debug("Checking if token refresh is needed")
 	token, err := a.getStoredToken()
 	if err != nil {
+		logging.Debug("No stored token found, refresh not possible")
 		return nil, err
 	}
 
 	// If token is still valid, return it
 	if token.Valid() {
+		logging.Debug("Stored token is still valid, no refresh needed")
 		return token, nil
 	}
 
+	logging.Debug("Token is expired, attempting refresh")
+
 	// If no refresh token, we need to re-authenticate
 	if token.RefreshToken == "" {
+		logging.Warn("No refresh token available, re-authentication required")
 		return nil, fmt.Errorf("no refresh token available, re-authentication required")
 	}
 
 	// Refresh the token
+	logging.Debug("Refreshing token using refresh token")
 	tokenSource := a.oauth2Config.TokenSource(ctx, token)
 	newToken, err := tokenSource.Token()
 	if err != nil {
+		logging.Error("Failed to refresh token", "error", err.Error())
 		return nil, fmt.Errorf("failed to refresh token: %w", err)
 	}
 
 	// Save the new token
+	logging.Debug("Saving refreshed token securely")
 	if err := a.SaveTokenSecurely(newToken); err != nil {
+		logging.Error("Failed to save refreshed token", "error", err.Error())
 		return nil, fmt.Errorf("failed to save refreshed token: %w", err)
 	}
 
+	logging.Info("Token successfully refreshed and saved")
 	return newToken, nil
 }
 
 // GetValidToken returns a valid token, refreshing if necessary
 func (a *Authenticator) GetValidToken(ctx context.Context) (*oauth2.Token, error) {
+	logging.Debug("Getting valid token (with refresh if needed)")
 	return a.RefreshTokenIfNeeded(ctx)
 }
 
 // ClearToken removes the stored token
 func (a *Authenticator) ClearToken() error {
+	logging.Info("Clearing stored authentication token")
 	if err := keyring.Delete(serviceName, tokenKey); err != nil {
+		logging.Error("Failed to delete token from keyring", "error", err.Error())
 		return fmt.Errorf("failed to delete token from keyring: %w", err)
 	}
+	logging.Info("Token successfully cleared from secure storage")
 	return nil
 }

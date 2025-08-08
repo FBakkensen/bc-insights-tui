@@ -1,0 +1,297 @@
+package appinsights
+
+// Azure Resource Manager client for discovering Application Insights resources
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/applicationinsights/armapplicationinsights"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
+	"golang.org/x/oauth2"
+)
+
+// ApplicationInsightsResource represents a discovered Application Insights resource
+type ApplicationInsightsResource struct {
+	Name               string `json:"name"`
+	ResourceGroup      string `json:"resourceGroup"`
+	SubscriptionID     string `json:"subscriptionId"`
+	Location           string `json:"location"`
+	ApplicationID      string `json:"applicationId"`
+	InstrumentationKey string `json:"instrumentationKey"`
+	ConnectionString   string `json:"connectionString"`
+	ResourceID         string `json:"resourceId"`
+}
+
+// AzureSubscription represents an Azure subscription
+type AzureSubscription struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	TenantID    string `json:"tenantId"`
+	State       string `json:"state"`
+	DisplayName string `json:"displayName"`
+}
+
+// FormatSubscriptionForDisplay returns a formatted string for displaying the subscription
+func (s AzureSubscription) FormatSubscriptionForDisplay() string {
+	return fmt.Sprintf("%s (%s) - %s", s.DisplayName, s.ID, s.State)
+}
+
+// DisplayText implements SelectableItem interface for AzureSubscription
+func (s AzureSubscription) DisplayText() string {
+	return s.FormatSubscriptionForDisplay()
+}
+
+// UniqueID implements SelectableItem interface for AzureSubscription
+func (s AzureSubscription) UniqueID() string {
+	return s.ID
+}
+
+// AzureClient provides methods to discover and interact with Azure Application Insights resources
+type AzureClient struct {
+	credential azcore.TokenCredential
+}
+
+// NewAzureClient creates a new Azure Resource Manager client using OAuth2 token
+func NewAzureClient(token *oauth2.Token) (*AzureClient, error) {
+	if token == nil {
+		return nil, fmt.Errorf("no authentication token provided")
+	}
+
+	// Create a credential from the OAuth2 token
+	credential, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Azure credential: %w", err)
+	}
+
+	return &AzureClient{
+		credential: credential,
+	}, nil
+}
+
+// ListApplicationInsightsResources lists all Application Insights resources accessible to the authenticated user
+func (ac *AzureClient) ListApplicationInsightsResources(ctx context.Context) ([]ApplicationInsightsResource, error) {
+	if ac.credential == nil {
+		return nil, fmt.Errorf("no Azure credential available")
+	}
+
+	// First, we need to get all subscriptions the user has access to
+	subscriptions, err := ac.getAccessibleSubscriptions(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get accessible subscriptions: %w", err)
+	}
+
+	var allResources []ApplicationInsightsResource
+
+	// For each subscription, list Application Insights resources
+	for _, subscriptionID := range subscriptions {
+		resources, err := ac.listResourcesInSubscription(ctx, subscriptionID)
+		if err != nil {
+			// Log error but continue with other subscriptions
+			continue
+		}
+		allResources = append(allResources, resources...)
+	}
+
+	return allResources, nil
+}
+
+// getAccessibleSubscriptions gets all subscription IDs accessible to the user
+func (ac *AzureClient) getAccessibleSubscriptions(ctx context.Context) ([]string, error) {
+	// This is a simplified implementation that would need to be expanded
+	// to actually enumerate subscriptions. For now, we'll require the user
+	// to provide subscription IDs through configuration or environment variables
+
+	// Check if subscription ID is provided via environment variable
+	subscriptionID := getSubscriptionFromEnvironment()
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("no subscription ID found. Please set AZURE_SUBSCRIPTION_ID environment variable")
+	}
+
+	return []string{subscriptionID}, nil
+}
+
+// getSubscriptionFromEnvironment gets subscription ID from environment variables
+func getSubscriptionFromEnvironment() string {
+	// Common environment variable names for Azure subscription ID
+	envVars := []string{
+		"AZURE_SUBSCRIPTION_ID",
+		"BCINSIGHTS_AZURE_SUBSCRIPTION_ID",
+		"ARM_SUBSCRIPTION_ID",
+	}
+
+	for _, envVar := range envVars {
+		if value := getEnvValue(envVar); value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+// getEnvValue is a helper to get environment variable values
+func getEnvValue(key string) string {
+	return os.Getenv(key)
+}
+
+// listResourcesInSubscription lists Application Insights resources in a specific subscription
+func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscriptionID string) ([]ApplicationInsightsResource, error) {
+	// Create Application Insights client for this subscription
+	clientFactory, err := armapplicationinsights.NewClientFactory(subscriptionID, ac.credential, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Application Insights client factory: %w", err)
+	}
+
+	componentsClient := clientFactory.NewComponentsClient()
+
+	// List all Application Insights components in the subscription
+	pager := componentsClient.NewListPager(nil)
+	var resources []ApplicationInsightsResource
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list Application Insights components: %w", err)
+		}
+
+		for _, component := range page.Value {
+			if component == nil {
+				continue
+			}
+
+			resource := ac.convertComponentToResource(component, subscriptionID)
+			resources = append(resources, resource)
+		}
+	}
+
+	return resources, nil
+}
+
+// convertComponentToResource converts an ARM Application Insights component to our resource type
+func (ac *AzureClient) convertComponentToResource(component *armapplicationinsights.Component, subscriptionID string) ApplicationInsightsResource {
+	resource := ApplicationInsightsResource{
+		SubscriptionID: subscriptionID,
+	}
+
+	if component.Name != nil {
+		resource.Name = *component.Name
+	}
+
+	if component.ID != nil {
+		resource.ResourceID = *component.ID
+		// Extract resource group from resource ID
+		// Format: /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Insights/components/{componentName}
+		parts := strings.Split(*component.ID, "/")
+		if len(parts) >= 5 {
+			resource.ResourceGroup = parts[4]
+		}
+	}
+
+	if component.Location != nil {
+		resource.Location = *component.Location
+	}
+
+	if component.Properties != nil {
+		if component.Properties.AppID != nil {
+			resource.ApplicationID = *component.Properties.AppID
+		}
+		if component.Properties.InstrumentationKey != nil {
+			resource.InstrumentationKey = *component.Properties.InstrumentationKey
+		}
+		if component.Properties.ConnectionString != nil {
+			resource.ConnectionString = *component.Properties.ConnectionString
+		}
+	}
+
+	return resource
+}
+
+// GetResourceDetails gets detailed information for a specific Application Insights resource
+func (ac *AzureClient) GetResourceDetails(ctx context.Context, subscriptionID, resourceGroupName, componentName string) (*ApplicationInsightsResource, error) {
+	clientFactory, err := armapplicationinsights.NewClientFactory(subscriptionID, ac.credential, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Application Insights client factory: %w", err)
+	}
+
+	componentsClient := clientFactory.NewComponentsClient()
+
+	// Get the specific component
+	resp, err := componentsClient.Get(ctx, resourceGroupName, componentName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Application Insights component: %w", err)
+	}
+
+	resource := ac.convertComponentToResource(&resp.Component, subscriptionID)
+	return &resource, nil
+}
+
+// FormatResourceForDisplay formats a resource for display in the TUI
+func (r *ApplicationInsightsResource) FormatResourceForDisplay() string {
+	if r.Name == "" {
+		return "Unknown Resource"
+	}
+
+	// Format: "ResourceName (ResourceGroup/Location)"
+	location := r.Location
+	if location == "" {
+		location = "unknown"
+	}
+
+	resourceGroup := r.ResourceGroup
+	if resourceGroup == "" {
+		resourceGroup = "unknown"
+	}
+
+	return fmt.Sprintf("%s (%s/%s)", r.Name, resourceGroup, location)
+}
+
+// ListSubscriptions lists all Azure subscriptions accessible to the authenticated user
+func (c *AzureClient) ListSubscriptions(ctx context.Context) ([]AzureSubscription, error) {
+	client, err := armsubscriptions.NewClient(c.credential, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create subscriptions client: %w", err)
+	}
+
+	var subscriptions []AzureSubscription
+	pager := client.NewListPager(nil)
+
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get subscriptions page: %w", err)
+		}
+
+		for _, sub := range page.Value {
+			if sub.SubscriptionID == nil || sub.DisplayName == nil || sub.State == nil {
+				continue // Skip incomplete subscription data
+			}
+
+			subscription := AzureSubscription{
+				ID:          *sub.SubscriptionID,
+				DisplayName: *sub.DisplayName,
+				State:       string(*sub.State),
+			}
+
+			// Set tenant ID if available
+			if sub.TenantID != nil {
+				subscription.TenantID = *sub.TenantID
+			}
+
+			// Set name (use DisplayName as fallback)
+			subscription.Name = subscription.DisplayName
+
+			subscriptions = append(subscriptions, subscription)
+		}
+	}
+
+	return subscriptions, nil
+}
+
+// IsConfigured returns true if the resource has both Application ID and connection string
+func (r *ApplicationInsightsResource) IsConfigured() bool {
+	return r.ApplicationID != "" && r.ConnectionString != ""
+}

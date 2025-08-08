@@ -190,6 +190,47 @@ func TestValidateAndUpdateSetting_ApplicationInsightsKey(t *testing.T) {
 	}
 }
 
+func TestValidateAndUpdateSetting_ApplicationInsightsAppId(t *testing.T) {
+	cfg := NewConfig()
+
+	testCases := []struct {
+		name          string
+		value         string
+		expectedValue string
+		expectError   bool
+	}{
+		// Valid values - applicationInsightsAppId allows any value including empty
+		{"empty", "", "", false},
+		{"simple_value", "12345678-1234-1234-1234-123456789012", "12345678-1234-1234-1234-123456789012", false},
+		{"with_spaces", "   test-app-id   ", "   test-app-id   ", false}, // Should preserve spaces
+		{"special_chars", "app-id@#$%^&*()", "app-id@#$%^&*()", false},
+		{"long_value", strings.Repeat("a", 1000), strings.Repeat("a", 1000), false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Reset to known state
+			cfg.ApplicationInsightsID = "initial-value"
+
+			err := cfg.ValidateAndUpdateSetting("applicationInsightsAppId", tc.value)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error, got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+
+				if cfg.ApplicationInsightsID != tc.expectedValue {
+					t.Errorf("Expected ApplicationInsightsID to be %q, got %q", tc.expectedValue, cfg.ApplicationInsightsID)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 	cfg := NewConfig()
 
@@ -217,6 +258,7 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 			originalFetchSize := cfg.LogFetchSize
 			originalEnvironment := cfg.Environment
 			originalAppInsightsKey := cfg.ApplicationInsightsKey
+			originalAppInsightsID := cfg.ApplicationInsightsID
 			originalTenantID := cfg.OAuth2.TenantID
 			originalClientID := cfg.OAuth2.ClientID
 			originalScopes := append([]string(nil), cfg.OAuth2.Scopes...) // Create a copy
@@ -236,6 +278,7 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 			if cfg.LogFetchSize != originalFetchSize ||
 				cfg.Environment != originalEnvironment ||
 				cfg.ApplicationInsightsKey != originalAppInsightsKey ||
+				cfg.ApplicationInsightsID != originalAppInsightsID ||
 				cfg.OAuth2.TenantID != originalTenantID ||
 				cfg.OAuth2.ClientID != originalClientID ||
 				!equalStringSlices(cfg.OAuth2.Scopes, originalScopes) {
@@ -250,6 +293,7 @@ func TestGetSettingValue_AllSettings(t *testing.T) {
 	cfg.LogFetchSize = 123
 	cfg.Environment = "TestValue"
 	cfg.ApplicationInsightsKey = "test-key-123456789"
+	cfg.ApplicationInsightsID = "test-app-id-12345"
 
 	testCases := []struct {
 		setting       string
@@ -259,6 +303,7 @@ func TestGetSettingValue_AllSettings(t *testing.T) {
 		{"fetchSize", "123", false},
 		{"environment", "TestValue", false},
 		{"applicationInsightsKey", "test...6789", false}, // Should be masked (first 4 + last 4)
+		{"applicationInsightsAppId", "test-app-id-12345", false},
 		{"unknownSetting", "", true},
 	}
 
@@ -322,7 +367,11 @@ func TestListAllSettings(t *testing.T) {
 	settings := cfg.ListAllSettings()
 
 	// Check that all expected settings are present
-	expectedSettings := []string{"fetchSize", "environment", "applicationInsightsKey", "oauth2.tenantId", "oauth2.clientId", "oauth2.scopes"}
+	expectedSettings := []string{
+		"fetchSize", "environment", "applicationInsightsKey", "applicationInsightsAppId",
+		"oauth2.tenantId", "oauth2.clientId", "oauth2.scopes",
+		"queryHistoryMaxEntries", "queryTimeoutSeconds", "queryHistoryFile", "editorPanelRatio",
+	}
 	for _, expectedSetting := range expectedSettings {
 		if _, exists := settings[expectedSetting]; !exists {
 			t.Errorf("Expected setting %q to be present in ListAllSettings", expectedSetting)
@@ -339,6 +388,9 @@ func TestListAllSettings(t *testing.T) {
 	if settings["applicationInsightsKey"] != "list...6789" {
 		t.Errorf("Expected applicationInsightsKey to be masked, got %q", settings["applicationInsightsKey"])
 	}
+	if settings["applicationInsightsAppId"] != "(not set)" {
+		t.Errorf("Expected applicationInsightsAppId to be '(not set)', got %q", settings["applicationInsightsAppId"])
+	}
 	// Check OAuth2 default values
 	if settings["oauth2.tenantId"] != "e48da249-7c64-41ec-8c89-cea18b6608fa" {
 		t.Errorf("Expected oauth2.tenantId to be the default value, got %q", settings["oauth2.tenantId"])
@@ -351,8 +403,8 @@ func TestListAllSettings(t *testing.T) {
 	}
 
 	// Check that no unexpected settings are present
-	if len(settings) != 10 {
-		t.Errorf("Expected exactly 10 settings, got %d: %v", len(settings), settings)
+	if len(settings) != 11 {
+		t.Errorf("Expected exactly 11 settings, got %d: %v", len(settings), settings)
 	}
 }
 

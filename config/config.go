@@ -18,11 +18,13 @@ const (
 	flagEnvironment = "environment"
 	flagFetchSize   = "fetch-size"
 	flagAppInsights = "app-insights-key"
+	flagAppID       = "app-insights-id"
 
 	// Setting names - Basic
 	settingFetchSize           = "fetchSize"
 	settingEnvironment         = "environment"
 	settingApplicationInsights = "applicationInsightsKey"
+	settingApplicationID       = "applicationInsightsAppId"
 
 	// Setting names - OAuth2
 	settingOAuth2TenantID = "oauth2.tenantId"
@@ -52,6 +54,7 @@ type Config struct {
 	LogFetchSize           int           `json:"fetchSize" yaml:"fetchSize"`
 	Environment            string        `json:"environment" yaml:"environment"`
 	ApplicationInsightsKey string        `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
+	ApplicationInsightsID  string        `json:"applicationInsightsAppId" yaml:"applicationInsightsAppId"`
 	OAuth2                 OAuth2Config  `json:"oauth2" yaml:"oauth2"`
 	QueryHistoryMaxEntries int           `json:"queryHistoryMaxEntries" yaml:"queryHistoryMaxEntries"`
 	QueryTimeoutSeconds    int           `json:"queryTimeoutSeconds" yaml:"queryTimeoutSeconds"`
@@ -66,6 +69,7 @@ func NewConfig() Config {
 		LogFetchSize:           50,
 		Environment:            "Development",
 		ApplicationInsightsKey: "",
+		ApplicationInsightsID:  "",
 		OAuth2: OAuth2Config{
 			TenantID: "e48da249-7c64-41ec-8c89-cea18b6608fa",
 			ClientID: "3b065ad6-067e-41f2-8cf7-19ddb0548a99",
@@ -118,6 +122,7 @@ func setupFlags() (*flag.FlagSet, *flagValues) {
 		fetchSize:   flagSet.Int(flagFetchSize, -1, "Number of log entries to fetch per request"),
 		environment: flagSet.String(flagEnvironment, "", "Environment name (e.g., Development, Production)"),
 		appInsights: flagSet.String(flagAppInsights, "", "Application Insights connection string"),
+		appID:       flagSet.String(flagAppID, "", "Application Insights App ID"),
 		configFile:  flagSet.String("config", "", "Path to configuration file (JSON)"),
 	}
 
@@ -129,6 +134,7 @@ type flagValues struct {
 	fetchSize   *int
 	environment *string
 	appInsights *string
+	appID       *string
 	configFile  *string
 }
 
@@ -137,6 +143,7 @@ type flagsSet struct {
 	fetchSize   bool
 	environment bool
 	appInsights bool
+	appID       bool
 }
 
 // trackSetFlags tracks which flags were explicitly set by the user
@@ -150,6 +157,8 @@ func trackSetFlags(flagSet *flag.FlagSet) flagsSet {
 			flags.environment = true
 		case flagAppInsights:
 			flags.appInsights = true
+		case flagAppID:
+			flags.appID = true
 		}
 	})
 	return flags
@@ -187,6 +196,9 @@ func applyBasicEnvVars(cfg *Config) {
 	}
 	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_KEY"); exists {
 		cfg.ApplicationInsightsKey = os.Getenv("BCINSIGHTS_APP_INSIGHTS_KEY") // Allow empty string
+	}
+	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_ID"); exists {
+		cfg.ApplicationInsightsID = os.Getenv("BCINSIGHTS_APP_INSIGHTS_ID") // Allow empty string
 	}
 }
 
@@ -240,6 +252,9 @@ func applyCommandLineFlags(cfg *Config, flags *flagValues, flagsSet flagsSet) {
 	}
 	if flagsSet.appInsights { // Allow empty string to override if flag was explicitly set
 		cfg.ApplicationInsightsKey = *flags.appInsights
+	}
+	if flagsSet.appID { // Allow empty string to override if flag was explicitly set
+		cfg.ApplicationInsightsID = *flags.appID
 	}
 }
 
@@ -297,6 +312,9 @@ func mergeConfig(base, file *Config) {
 	if file.ApplicationInsightsKey != "" {
 		base.ApplicationInsightsKey = file.ApplicationInsightsKey
 	}
+	if file.ApplicationInsightsID != "" {
+		base.ApplicationInsightsID = file.ApplicationInsightsID
+	}
 
 	// Merge OAuth2 configuration
 	if file.OAuth2.TenantID != "" {
@@ -350,7 +368,7 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 // isBasicSetting checks if the setting name is a basic configuration setting
 func (c *Config) isBasicSetting(name string) bool {
 	switch name {
-	case settingFetchSize, settingEnvironment, settingApplicationInsights:
+	case settingFetchSize, settingEnvironment, settingApplicationInsights, settingApplicationID:
 		return true
 	default:
 		return false
@@ -398,6 +416,9 @@ func (c *Config) validateBasicSetting(name, value string) error {
 	case settingApplicationInsights:
 		// Allow empty for clearing the key
 		c.ApplicationInsightsKey = value
+	case settingApplicationID:
+		// Allow empty for clearing the ID
+		c.ApplicationInsightsID = value
 	default:
 		return fmt.Errorf("unknown basic setting: %s", name)
 	}
@@ -513,6 +534,11 @@ func (c *Config) getBasicSettingValue(name string) (string, error) {
 			return c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:], nil
 		}
 		return "***", nil
+	case settingApplicationID:
+		if c.ApplicationInsightsID == "" {
+			return notSetValue, nil
+		}
+		return c.ApplicationInsightsID, nil
 	default:
 		return "", fmt.Errorf("unknown basic setting: %s", name)
 	}
@@ -574,6 +600,11 @@ func (c *Config) ListAllSettings() map[string]string {
 		settings["applicationInsightsKey"] = c.ApplicationInsightsKey[:4] + "..." + c.ApplicationInsightsKey[len(c.ApplicationInsightsKey)-4:]
 	} else {
 		settings["applicationInsightsKey"] = "***"
+	}
+	if c.ApplicationInsightsID == "" {
+		settings["applicationInsightsAppId"] = notSetValue
+	} else {
+		settings["applicationInsightsAppId"] = c.ApplicationInsightsID
 	}
 
 	// OAuth2 settings
