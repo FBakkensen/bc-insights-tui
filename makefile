@@ -44,26 +44,6 @@ ui-test:
 	@echo "🎨 Running UI visual tests..."
 	go test -v ./tui/ -run "TestUI.*"
 
-# Run full UI verification with bash script
-ui-verify:
-	@echo "🔍 Running UI verification with AI analysis..."
-	@if [ -f "./verify_ui.sh" ]; then \
-		chmod +x ./verify_ui.sh && ./verify_ui.sh; \
-	else \
-		echo "❌ verify_ui.sh not found"; \
-		exit 1; \
-	fi
-
-# Run UI verification without AI (CI-friendly)
-ui-verify-ci:
-	@echo "🔍 Running UI verification (CI mode - no AI)..."
-	@if [ -f "./verify_ui.sh" ]; then \
-		chmod +x ./verify_ui.sh && ./verify_ui.sh --skip-ai; \
-	else \
-		echo "❌ verify_ui.sh not found"; \
-		exit 1; \
-	fi
-
 # Show help
 help:
 	@echo "Available targets:"
@@ -75,7 +55,5 @@ help:
 	@echo "  vet        - Run go vet"
 	@echo "  clean      - Clean build artifacts and UI test outputs"
 	@echo "  ui-test    - Run UI visual tests"
-	@echo "  ui-verify  - Run full UI verification with AI analysis"
-	@echo "  ui-verify-ci - Run UI verification without AI (CI-friendly)"
 	@echo "  all        - Run lint, test, and build (default)"
 	@echo "  help       - Show this help"

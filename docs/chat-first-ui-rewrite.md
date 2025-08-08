@@ -31,7 +31,7 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 
 - [x] Research and write clean-slate plan
 - [x] Add deletion-first step to the plan
-- [ ] Step 0: Remove existing UI and UI tests
+- [x] Step 0: Remove existing UI and UI tests
 - [ ] Step 1: Login (device flow)
 - [ ] Step 2: Select subscription
 - [ ] Step 3: Select Application Insights resource
