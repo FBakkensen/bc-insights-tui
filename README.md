@@ -126,6 +126,30 @@ Press `Ctrl+P` to open the command palette and use these commands:
 - `Ctrl+Q` - Exit application
 - `Ctrl+C` - Force exit application
 
+### Single-line KQL (Step 5)
+
+You can run Application Insights Kusto queries directly from the chat input:
+
+- Type: `kql: <your KQL>` and press Enter.
+- The top panel shows a snapshot table with up to your configured fetch size and a summary line.
+- Press Enter on an empty input to open the results in an interactive table (use arrow keys to navigate, Esc to return).
+
+Requirements:
+- Be authenticated (`login`).
+- Set an Application Insights App ID (`config set applicationInsightsAppId=<id>` or pick from resources).
+
+Errors are mapped to actionable hints (401/403/400/429, timeouts) and logs include a query hash, not the full text.
+
+### Debug logs
+
+To enable detailed debug logging while writing to a daily file under `logs/`:
+
+- Set environment variable `BC_INSIGHTS_LOG_LEVEL=DEBUG` before starting the app.
+- Logs are written to `logs/bc-insights-tui-YYYY-MM-DD.log`.
+- By default, logs are not mirrored to the terminal to avoid interfering with the TUI.
+- Optional: To mirror logs to stdout (for local troubleshooting only), set `BC_INSIGHTS_LOG_TO_STDOUT=true`.
+- KQL execution logs preflight, request timing, HTTP status codes, and response metadata (request IDs). Secrets and the full query text are not logged.
+
 ## 🔍 Business Central Telemetry Context
 
 This tool is specifically designed for Business Central telemetry data structure:

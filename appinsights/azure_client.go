@@ -195,7 +195,7 @@ func (ac *AzureClient) ListApplicationInsightsResourcesForSubscription(ctx conte
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscription ID is required")
 	}
-
+	logging.Debug("Listing AI resources for subscription", "subscriptionId", subscriptionID)
 	return ac.listResourcesInSubscription(ctx, subscriptionID)
 }
 
@@ -240,23 +240,28 @@ func getEnvValue(key string) string {
 // listResourcesInSubscription lists Application Insights resources in a specific subscription
 func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscriptionID string) ([]ApplicationInsightsResource, error) {
 	// Create Application Insights client for this subscription
+	logging.Debug("Creating AI client factory", "subscriptionId", subscriptionID)
 	clientFactory, err := armapplicationinsights.NewClientFactory(subscriptionID, ac.credential, nil)
 	if err != nil {
+		logging.Error("Failed to create AI client factory", "subscriptionId", subscriptionID, "error", err.Error())
 		return nil, fmt.Errorf("failed to create Application Insights client factory: %w", err)
 	}
 
 	componentsClient := clientFactory.NewComponentsClient()
 
 	// List all Application Insights components in the subscription
+	logging.Debug("Starting AI components pager", "subscriptionId", subscriptionID)
 	pager := componentsClient.NewListPager(nil)
 	var resources []ApplicationInsightsResource
 
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
+			logging.Error("Failed to list AI components page", "subscriptionId", subscriptionID, "error", err.Error())
 			return nil, fmt.Errorf("failed to list Application Insights components: %w", err)
 		}
 
+		logging.Debug("Received AI components page", "subscriptionId", subscriptionID, "count", fmt.Sprintf("%d", len(page.Value)))
 		for _, component := range page.Value {
 			if component == nil {
 				continue
@@ -267,6 +272,7 @@ func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscrip
 		}
 	}
 
+	logging.Info("Completed AI components listing", "subscriptionId", subscriptionID, "total", fmt.Sprintf("%d", len(resources)))
 	return resources, nil
 }
 

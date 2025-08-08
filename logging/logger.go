@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -47,11 +48,14 @@ func InitLogger(logLevel string) error {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Create multi-writer to write to both file and stdout (for development)
+	// Create writer that always writes to file; optionally mirror to stdout if explicitly enabled.
 	writers := []io.Writer{logFile}
 
-	// Add stdout for debug level
-	if logLevel == LevelDebug {
+	// Optional opt-in mirroring to stdout to aid local debugging without breaking TUI.
+	// Set BC_INSIGHTS_LOG_TO_STDOUT=true to enable.
+	mirrorEnv := strings.TrimSpace(os.Getenv("BC_INSIGHTS_LOG_TO_STDOUT"))
+	mirrorToStdout := mirrorEnv != "" && (strings.EqualFold(mirrorEnv, "1") || strings.EqualFold(mirrorEnv, "true") || strings.EqualFold(mirrorEnv, "yes"))
+	if mirrorToStdout {
 		writers = append(writers, os.Stdout)
 	}
 
@@ -66,7 +70,7 @@ func InitLogger(logLevel string) error {
 		logLevel: logLevel,
 	}
 
-	Info("Logger initialized", "level", logLevel, "file", logFileName)
+	Info("Logger initialized", "level", logLevel, "file", logFileName, "mirrorStdout", fmt.Sprintf("%t", mirrorToStdout))
 	return nil
 }
 
