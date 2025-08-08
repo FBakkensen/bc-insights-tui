@@ -33,7 +33,7 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 - [x] Add deletion-first step to the plan
 - [x] Step 0: Remove existing UI and UI tests
 - [x] Step 1: Login (device flow)
-- [ ] Step 2: Select subscription
+- [x] Step 2: Select subscription
 - [ ] Step 3: Select Application Insights resource
 - [ ] Step 4: Set / Get configuration
 - [ ] Step 5: Type and execute KQL
@@ -63,6 +63,8 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 ### Step 3 — Select Azure Application Insights resource
 - Similar to subscriptions: show insights components for the chosen subscription in a list panel.
 - On selection, confirm in chat and set as current context.
+- the selected insights should be set in the config file.
+- be aware that there might be a different auth flow for insights than for subscriptions. research on this using the azure mcp, and do not break the subscriptions og login.
 
 ### Step 4 — Set / Get Configuration
 - Commands via chat:

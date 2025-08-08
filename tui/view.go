@@ -10,7 +10,7 @@ func (m model) View() string {
 		return ""
 	}
 	var top string
-	if m.mode == modeListSubscriptions {
+	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
 		top = m.vpStyle.Render(m.list.View())
 	} else {
 		top = m.vpStyle.Render(m.vp.View())

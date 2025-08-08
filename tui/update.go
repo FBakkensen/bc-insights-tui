@@ -26,16 +26,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg)
 	case tea.KeyMsg:
-		// When in list mode, handle Esc and selection differently
-		if m.mode == modeListSubscriptions {
-			return m.handleListKey(msg)
-		}
-		// In chat mode: Let textarea consume keys first so typing works
-		var cmd tea.Cmd
-		m.ta, cmd = m.ta.Update(msg)
-		// Then handle global keys and Enter submission
-		m2, cmd2 := m.handleKey(msg)
-		return m2, tea.Batch(cmd, cmd2)
+		return m.handleKeyMessage(msg)
 	case deviceCodeMsg:
 		return m.handleDeviceCode(msg)
 	case authSuccessMsg:
@@ -43,24 +34,66 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case authErrorMsg:
 		return m.handleAuthError(msg)
 	case subsLoadedMsg:
-		if msg.err != nil {
-			logging.Error("Failed to load subscriptions", "error", msg.err.Error())
-			m.append("Failed to load subscriptions: " + msg.err.Error())
-			m.mode = modeChat
-			return m, nil
-		}
-		logging.Debug("Received subsLoadedMsg", "itemCount", fmt.Sprintf("%d", len(msg.items)))
-		m.list.SetItems(msg.items)
-		if len(msg.items) == 0 {
-			m.append("No subscriptions found for this account.")
-			m.mode = modeChat
-			return m, nil
-		}
-		logging.Debug("Set items to list", "listItemCount", fmt.Sprintf("%d", len(m.list.Items())))
-		// Stay in list mode and focus list
-		return m, nil
+		return m.handleSubsLoaded(msg)
+	case insightsLoadedMsg:
+		return m.handleInsightsLoaded(msg)
 	}
 	// Let child components update
+	return m.handleComponentUpdate(msg)
+}
+
+func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// When in list mode, handle Esc and selection differently
+	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
+		return m.handleListKey(msg)
+	}
+	// In chat mode: Let textarea consume keys first so typing works
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
+	// Then handle global keys and Enter submission
+	m2, cmd2 := m.handleKey(msg)
+	return m2, tea.Batch(cmd, cmd2)
+}
+
+func (m model) handleSubsLoaded(msg subsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		logging.Error("Failed to load subscriptions", "error", msg.err.Error())
+		m.append("Failed to load subscriptions: " + msg.err.Error())
+		m.mode = modeChat
+		return m, nil
+	}
+	logging.Debug("Received subsLoadedMsg", "itemCount", fmt.Sprintf("%d", len(msg.items)))
+	m.list.SetItems(msg.items)
+	if len(msg.items) == 0 {
+		m.append("No subscriptions found for this account.")
+		m.mode = modeChat
+		return m, nil
+	}
+	logging.Debug("Set items to list", "listItemCount", fmt.Sprintf("%d", len(m.list.Items())))
+	// Stay in list mode and focus list
+	return m, nil
+}
+
+func (m model) handleInsightsLoaded(msg insightsLoadedMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		logging.Error("Failed to load Application Insights resources", "error", msg.err.Error())
+		m.append("Failed to load Application Insights resources: " + msg.err.Error())
+		m.mode = modeChat
+		return m, nil
+	}
+	logging.Debug("Received insightsLoadedMsg", "itemCount", fmt.Sprintf("%d", len(msg.items)))
+	m.list.SetItems(msg.items)
+	if len(msg.items) == 0 {
+		m.append("No Application Insights resources found in the selected subscription.")
+		m.mode = modeChat
+		return m, nil
+	}
+	logging.Debug("Set Application Insights items to list", "listItemCount", fmt.Sprintf("%d", len(m.list.Items())))
+	// Stay in list mode and focus list
+	return m, nil
+}
+
+func (m model) handleComponentUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
 	// Track followTail based on whether user is at bottom before update
@@ -151,7 +184,7 @@ func (m model) handlePreAuthCommand(input string) (tea.Model, tea.Cmd) {
 func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	switch input {
 	case "help", "?":
-		m.append("Commands: help, subs, login, quit")
+		m.append("Commands: help, subs, resources, config, login, quit")
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
@@ -159,29 +192,58 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 		// Open subscriptions list panel and load items
 		m.mode = modeListSubscriptions
 		m.list.SetItems(nil)
+		m.list.Title = titleSelectSubscription
 		m.append("Loading subscriptions…")
 		return m, m.loadSubscriptionsCmd()
+	case "resources":
+		// Open Application Insights resources list panel and load items
+		m.mode = modeListInsightsResources
+		m.list.SetItems(nil)
+		m.list.Title = titleSelectInsights
+		m.append("Loading Application Insights resources…")
+		return m, m.loadInsightsResourcesCmd()
+	case "config":
+		// Show current configuration
+		m.showConfig()
+		return m, nil
 	default:
 		m.append("Unknown command. Type 'help'.")
 	}
 	return m, nil
 }
 
-// handleListKey processes keys while in subscriptions list mode
+// handleListKey processes keys while in list modes (subscriptions or insights resources)
 func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		switch m.mode {
+		case modeListSubscriptions:
+			m.append("Closed subscriptions panel.")
+		case modeListInsightsResources:
+			m.append("Closed Application Insights resources panel.")
+		}
 		m.mode = modeChat
-		m.append("Closed subscriptions panel.")
 		return m, nil
 	case "enter":
-		if sel, ok := m.list.SelectedItem().(subscriptionItem); ok {
-			if err := m.cfg.ValidateAndUpdateSetting(keyAzureSubscriptionID, sel.s.ID); err != nil {
-				m.append("Failed to set subscription: " + err.Error())
-			} else {
-				m.append("Subscription selected: " + sel.s.DisplayName + " (" + sel.s.ID + ")")
+		switch m.mode {
+		case modeListSubscriptions:
+			if sel, ok := m.list.SelectedItem().(subscriptionItem); ok {
+				if err := m.cfg.ValidateAndUpdateSetting(keyAzureSubscriptionID, sel.s.ID); err != nil {
+					m.append("Failed to set subscription: " + err.Error())
+				} else {
+					m.append("Subscription selected: " + sel.s.DisplayName + " (" + sel.s.ID + ")")
+				}
+				m.mode = modeChat
 			}
-			m.mode = modeChat
+		case modeListInsightsResources:
+			if sel, ok := m.list.SelectedItem().(insightsResourceItem); ok {
+				if err := m.cfg.ValidateAndUpdateSetting("applicationInsightsAppId", sel.r.ApplicationID); err != nil {
+					m.append("Failed to set Application Insights resource: " + err.Error())
+				} else {
+					m.append("Application Insights resource selected: " + sel.r.Name + " (App ID: " + sel.r.ApplicationID + ")")
+				}
+				m.mode = modeChat
+			}
 		}
 		return m, nil
 	}
