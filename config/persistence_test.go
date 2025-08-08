@@ -208,6 +208,16 @@ func TestConfigFilePathResolution(t *testing.T) {
 			// Create fresh subdirectory for each test
 			testDir := filepath.Join(tempDir, tc.name)
 			os.MkdirAll(testDir, 0o755)
+
+			// Save current directory and restore it after this subtest
+			currentDir, err := os.Getwd()
+			if err != nil {
+				t.Fatalf("Failed to get current directory: %v", err)
+			}
+			t.Cleanup(func() {
+				os.Chdir(currentDir)
+			})
+
 			os.Chdir(testDir)
 
 			// Create setup files

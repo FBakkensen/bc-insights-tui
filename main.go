@@ -230,7 +230,18 @@ func listInsightsResourcesNonInteractive(cfg config.Config) error {
 		fmt.Printf("   Resource Group: %s\n", r.ResourceGroup)
 		fmt.Printf("   Location: %s\n", r.Location)
 		fmt.Printf("   Application ID: %s\n", r.ApplicationID)
-		fmt.Printf("   Instrumentation Key: %s\n", r.InstrumentationKey[:8]+"...")
+
+		// Safely display instrumentation key preview
+		var keyPreview string
+		if len(r.InstrumentationKey) >= 8 {
+			keyPreview = r.InstrumentationKey[:8] + "..."
+		} else if len(r.InstrumentationKey) > 0 {
+			keyPreview = r.InstrumentationKey + "..."
+		} else {
+			keyPreview = "(empty)"
+		}
+		fmt.Printf("   Instrumentation Key: %s\n", keyPreview)
+
 		fmt.Println()
 		logging.Debug("Application Insights resource found",
 			"index", fmt.Sprintf("%d", i),

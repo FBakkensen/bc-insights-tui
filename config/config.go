@@ -338,10 +338,14 @@ func isRealUserConfig(path string) bool {
 	if strings.Contains(path, "AppData") ||
 		strings.Contains(path, "Users") ||
 		(strings.Contains(path, "home") && !strings.Contains(path, "Temp")) {
-		// Additional check: if it contains our actual username, it's probably real
-		if strings.Contains(path, "FlemmingBK") {
+
+		// Allow environment variable override for testing in specific environments
+		if override := os.Getenv("BCINSIGHTS_ALLOW_REAL_USER_CONFIG"); override == "true" {
 			return true
 		}
+
+		// If no override, assume it's a real user config based on directory heuristics
+		return true
 	}
 
 	return false
