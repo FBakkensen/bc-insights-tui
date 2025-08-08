@@ -3,12 +3,19 @@ package config
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// setupTestModeForPersistence sets the TEST_MODE environment variable for test isolation
+func setupTestModeForPersistence(t *testing.T) {
+	t.Helper()
+	t.Setenv("TEST_MODE", "1")
+}
+
 func TestSaveConfig_TestIsolationBehavior(t *testing.T) {
+	setupTestModeForPersistence(t)
+
 	// Test that SaveConfig respects test isolation by not actually saving
 	// during tests (this is the intended behavior for test isolation)
 
@@ -37,46 +44,43 @@ func TestSaveConfig_TestIsolationBehavior(t *testing.T) {
 }
 
 func TestConfigPersistence_Integration(t *testing.T) {
-	// Test the overall config persistence behavior that would work in production
-	// This tests the integration without actually writing files during tests
+	// Integration test for configuration persistence using dependency injection
+	fs := NewMemFileSystem()
 
+	// Initially, SaveConfig should not error (no file to find)
 	cfg := NewConfig()
-	cfg.LogFetchSize = 123
-	cfg.Environment = "IntegrationTest"
-	cfg.ApplicationInsightsKey = "integration-key"
+	cfg.LogFetchSize = 999
+	cfg.Environment = "TestPersistence"
 
-	// Test that SaveConfig doesn't error (even though it won't save during tests)
+	// Save config (will be no-op in test mode but shouldn't error)
 	err := cfg.SaveConfig()
 	if err != nil {
 		t.Fatalf("SaveConfig should not error even in test mode: %v", err)
 	}
 
-	// Test that findConfigFile works correctly in test mode
-	tempDir := t.TempDir()
-	originalWd, _ := os.Getwd()
-	defer os.Chdir(originalWd)
-	os.Chdir(tempDir)
+	// Test that findConfigFile works correctly with dependency injection
+	loader := NewTestConfigLoader(fs, []string{"config.json"})
 
 	// Initially, no config file should be found
-	path := findConfigFile()
+	path := loader.findConfigFile()
 	if path != "" {
 		t.Errorf("Expected no config file initially, got %q", path)
 	}
 
 	// Create a config file and test path resolution
 	testConfig := `{"fetchSize": 100, "environment": "Test"}`
-	err = os.WriteFile("config.json", []byte(testConfig), 0o644)
+	err = fs.WriteFile("config.json", []byte(testConfig), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	path = findConfigFile()
+	path = loader.findConfigFile()
 	if path != configFileName {
 		t.Errorf("Expected findConfigFile to return %s, got %q", configFileName, path)
 	}
 
 	// Test loading the config
-	loadedCfg, err := loadConfigFromFile(path)
+	loadedCfg, err := loader.loadConfigFromFile(path)
 	if err != nil {
 		t.Fatalf("Failed to load config from file: %v", err)
 	}
@@ -90,8 +94,9 @@ func TestConfigPersistence_Integration(t *testing.T) {
 }
 
 func TestValidateAndUpdateSetting_NoAutoSaveInTest(t *testing.T) {
-	// Test that ValidateAndUpdateSetting works but doesn't auto-save during tests
-	// (This verifies the test isolation is working correctly)
+	setupTestModeForPersistence(t)
+
+	// Test that ValidateAndUpdateSetting does not auto-save to file during tests
 
 	tempDir := t.TempDir()
 	originalWd, _ := os.Getwd()
@@ -146,91 +151,82 @@ func TestSaveConfig_ErrorHandling(t *testing.T) {
 		t.Errorf("SaveConfig should not error in test mode: %v", err)
 	}
 
-	// Test that findConfigFile handles various scenarios
-	tempDir := t.TempDir()
-	originalWd, _ := os.Getwd()
-	defer os.Chdir(originalWd)
-	os.Chdir(tempDir)
+	// Test that findConfigFile handles various scenarios using dependency injection
+	fs := NewMemFileSystem()
+	loader := NewTestConfigLoader(fs, []string{"config.json"})
 
 	// Test with no config file (should return empty string)
-	path := findConfigFile()
+	path := loader.findConfigFile()
 	if path != "" {
 		t.Errorf("findConfigFile should return empty string with no existing files, got %q", path)
 	}
 
 	// Test with valid config file
-	err = os.WriteFile(configFileName, []byte(`{"fetchSize": 1}`), 0o644)
+	err = fs.WriteFile("config.json", []byte(`{"fetchSize": 1}`), 0o644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	path = findConfigFile()
-	if path != configFileName {
-		t.Errorf("findConfigFile should return %s with valid file, got %q", configFileName, path)
+	path = loader.findConfigFile()
+	if path != "config.json" {
+		t.Errorf("findConfigFile should return config.json with valid file, got %q", path)
 	}
 }
 
 func TestConfigFilePathResolution(t *testing.T) {
-	// Test that findConfigFile uses correct config file path precedence
-	tempDir := t.TempDir()
-	originalWd, _ := os.Getwd()
-	defer os.Chdir(originalWd)
+	// Test that findConfigFile uses correct config file path precedence using dependency injection
 
 	testCases := []struct {
 		name         string
 		setupFiles   []string
+		searchPaths  []string
 		expectedFile string
 	}{
 		{
 			name:         "returns empty when no config exists",
 			setupFiles:   []string{},
+			searchPaths:  []string{"config.json", "bc-insights-tui.json"},
 			expectedFile: "",
 		},
 		{
 			name:         "finds existing config.json",
 			setupFiles:   []string{"config.json"},
+			searchPaths:  []string{"config.json", "bc-insights-tui.json"},
 			expectedFile: "config.json",
 		},
 		{
 			name:         "finds existing bc-insights-tui.json",
 			setupFiles:   []string{"bc-insights-tui.json"},
+			searchPaths:  []string{"config.json", "bc-insights-tui.json"},
 			expectedFile: "bc-insights-tui.json",
 		},
 		{
 			name:         "prefers config.json over bc-insights-tui.json",
 			setupFiles:   []string{"config.json", "bc-insights-tui.json"},
+			searchPaths:  []string{"config.json", "bc-insights-tui.json"},
 			expectedFile: "config.json",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create fresh subdirectory for each test
-			testDir := filepath.Join(tempDir, tc.name)
-			os.MkdirAll(testDir, 0o755)
-
-			// Save current directory and restore it after this subtest
-			currentDir, err := os.Getwd()
-			if err != nil {
-				t.Fatalf("Failed to get current directory: %v", err)
-			}
-			t.Cleanup(func() {
-				os.Chdir(currentDir)
-			})
-
-			os.Chdir(testDir)
+			// Create isolated filesystem for each test
+			fs := NewMemFileSystem()
 
 			// Create setup files
 			for _, filename := range tc.setupFiles {
 				initialData := `{"fetchSize": 1}`
-				err := os.WriteFile(filename, []byte(initialData), 0o644)
+				err := fs.WriteFile(filename, []byte(initialData), 0o644)
 				if err != nil {
 					t.Fatalf("Failed to create setup file %s: %v", filename, err)
 				}
 			}
 
+			// Create test loader with specified search paths
+			loader := NewTestConfigLoader(fs, tc.searchPaths)
+
 			// Test findConfigFile
-			path := findConfigFile()
+			path := loader.findConfigFile()
 			if path != tc.expectedFile {
 				t.Errorf("Expected findConfigFile to return %q, got %q", tc.expectedFile, path)
 			}
@@ -283,49 +279,5 @@ func TestConfigJSONSerialization(t *testing.T) {
 	// Let's just verify the content contains the basic parts and is valid JSON
 	if !strings.Contains(content, "format-test-key-with-special-chars") {
 		t.Errorf("ApplicationInsightsKey should be in JSON output, got: %s", content)
-	}
-}
-
-func TestIsTestMode(t *testing.T) {
-	// Test that isTestMode correctly detects test environment
-	if !isTestMode() {
-		t.Error("isTestMode should return true when running tests")
-	}
-}
-
-func TestFindConfigFile_TestMode(t *testing.T) {
-	// Test the findConfigFile function behavior in test mode
-	tempDir := t.TempDir()
-	originalWd, _ := os.Getwd()
-	defer os.Chdir(originalWd)
-	os.Chdir(tempDir)
-
-	// Test with no existing config file
-	path := findConfigFile()
-	if path != "" {
-		t.Errorf("Expected findConfigFile to return empty string with no files, got %q", path)
-	}
-
-	// Create config.json and test again
-	err := os.WriteFile("config.json", []byte(`{"fetchSize": 1}`), 0o644)
-	if err != nil {
-		t.Fatalf("Failed to create test config file: %v", err)
-	}
-
-	path = findConfigFile()
-	if path != "config.json" {
-		t.Errorf("Expected findConfigFile to return existing config.json, got %q", path)
-	}
-
-	// Create bc-insights-tui.json and test precedence
-	os.Remove("config.json")
-	err = os.WriteFile("bc-insights-tui.json", []byte(`{"fetchSize": 1}`), 0o644)
-	if err != nil {
-		t.Fatalf("Failed to create test config file: %v", err)
-	}
-
-	path = findConfigFile()
-	if path != "bc-insights-tui.json" {
-		t.Errorf("Expected findConfigFile to return existing bc-insights-tui.json, got %q", path)
 	}
 }

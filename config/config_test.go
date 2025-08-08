@@ -2,9 +2,6 @@ package config
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -13,13 +10,18 @@ const (
 	testEnvKey  = "env-key"
 )
 
-func TestLoadConfig_DefaultValues(t *testing.T) {
-	// Ensure environment is clean
-	if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
-		t.Logf("Failed to unset environment variable: %v", err)
-	}
+// createTestLoader creates a ConfigLoader with in-memory filesystem for testing
+func createTestLoader(t *testing.T) (*ConfigLoader, *MemFileSystem) {
+	t.Helper()
+	fs := NewMemFileSystem()
+	loader := NewTestConfigLoader(fs, []string{"/test/config.json", "/home/user/.config/bc-insights-tui/config.json"})
+	return loader, fs
+}
 
-	cfg := LoadConfig()
+func TestLoadConfig_DefaultValues(t *testing.T) {
+	loader, _ := createTestLoader(t)
+
+	cfg := loader.LoadWithArgs([]string{})
 
 	if cfg.LogFetchSize != 50 {
 		t.Errorf("Expected default LogFetchSize to be 50, got %d", cfg.LogFetchSize)
@@ -40,17 +42,12 @@ func TestLoadConfig_ValidEnvironmentVariable(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set environment variable
-			if err := os.Setenv("LOG_FETCH_SIZE", tc.envValue); err != nil {
-				t.Fatalf("Failed to set environment variable: %v", err)
-			}
-			defer func() {
-				if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
-					t.Logf("Failed to unset environment variable: %v", err)
-				}
-			}()
+			loader, _ := createTestLoader(t)
 
-			cfg := LoadConfig()
+			// Set environment variable using test helper
+			t.Setenv("LOG_FETCH_SIZE", tc.envValue)
+
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expected {
 				t.Errorf("Expected LogFetchSize to be %d, got %d", tc.expected, cfg.LogFetchSize)
@@ -76,17 +73,12 @@ func TestLoadConfig_InvalidEnvironmentVariable(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set environment variable
-			if err := os.Setenv("LOG_FETCH_SIZE", tc.envValue); err != nil {
-				t.Fatalf("Failed to set environment variable: %v", err)
-			}
-			defer func() {
-				if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
-					t.Logf("Failed to unset environment variable: %v", err)
-				}
-			}()
+			loader, _ := createTestLoader(t)
 
-			cfg := LoadConfig()
+			// Set environment variable using test helper
+			t.Setenv("LOG_FETCH_SIZE", tc.envValue)
+
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expected {
 				t.Errorf("Expected LogFetchSize to fallback to %d for invalid value %q, got %d",
@@ -110,17 +102,12 @@ func TestLoadConfig_EnvironmentVariableEdgeCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set environment variable
-			if err := os.Setenv("LOG_FETCH_SIZE", tc.envValue); err != nil {
-				t.Fatalf("Failed to set environment variable: %v", err)
-			}
-			defer func() {
-				if err := os.Unsetenv("LOG_FETCH_SIZE"); err != nil {
-					t.Logf("Failed to unset environment variable: %v", err)
-				}
-			}()
+			loader, _ := createTestLoader(t)
 
-			cfg := LoadConfig()
+			// Set environment variable using test helper
+			t.Setenv("LOG_FETCH_SIZE", tc.envValue)
+
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expected {
 				t.Errorf("Expected LogFetchSize to be %d for value %q, got %d",
@@ -141,17 +128,51 @@ func TestConfig_StructFields(t *testing.T) {
 
 // Additional tests as requested in the issue
 
+// createTestLoaderWithFlags creates a ConfigLoader with in-memory filesystem and mock flags for testing
+func createTestLoaderWithFlags(t *testing.T, flags map[string]interface{}) (*ConfigLoader, *MemFileSystem) {
+	t.Helper()
+	fs := NewMemFileSystem()
+	loader := NewTestConfigLoader(fs, []string{"/test/config.json", "/home/user/.config/bc-insights-tui/config.json"})
+
+	// Set up mock flags if provided
+	if len(flags) > 0 {
+		parsedFlags := &ParsedFlags{}
+
+		if val, ok := flags["fetch-size"]; ok {
+			if intVal, ok := val.(int); ok {
+				parsedFlags.fetchSize = &intVal
+			}
+		}
+		if val, ok := flags["environment"]; ok {
+			if strVal, ok := val.(string); ok {
+				parsedFlags.environment = &strVal
+			}
+		}
+		if val, ok := flags["app-insights-key"]; ok {
+			if strVal, ok := val.(string); ok {
+				parsedFlags.applicationInsights = &strVal
+			}
+		}
+
+		if mockParser, ok := loader.flagParser.(*MockFlagParser); ok {
+			mockParser.SetFlags(parsedFlags)
+		}
+	}
+
+	return loader, fs
+}
+
 func TestLoadConfig_CommandLineFlags(t *testing.T) {
 	// Test command line flags override environment variables
 	testCases := []struct {
 		name     string
-		args     []string
+		flags    map[string]interface{}
 		envVars  map[string]string
 		expected Config
 	}{
 		{
 			name:    "fetch-size flag overrides env",
-			args:    []string{"--fetch-size=200"},
+			flags:   map[string]interface{}{"fetch-size": 200},
 			envVars: map[string]string{"LOG_FETCH_SIZE": "100"},
 			expected: Config{
 				LogFetchSize:           200,
@@ -161,7 +182,7 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 		},
 		{
 			name:    "environment flag overrides env",
-			args:    []string{"--environment=Testing"},
+			flags:   map[string]interface{}{"environment": "Testing"},
 			envVars: map[string]string{"BCINSIGHTS_ENVIRONMENT": "Production"},
 			expected: Config{
 				LogFetchSize:           50,
@@ -171,7 +192,7 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 		},
 		{
 			name:    "app-insights-key flag overrides env",
-			args:    []string{"--app-insights-key=flag-key"},
+			flags:   map[string]interface{}{"app-insights-key": "flag-key"},
 			envVars: map[string]string{"BCINSIGHTS_APP_INSIGHTS_KEY": testEnvKey},
 			expected: Config{
 				LogFetchSize:           50,
@@ -181,7 +202,11 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 		},
 		{
 			name: "multiple flags override multiple env vars",
-			args: []string{"--fetch-size=300", "--environment=Staging", "--app-insights-key=multi-key"},
+			flags: map[string]interface{}{
+				"fetch-size":       300,
+				"environment":      "Staging",
+				"app-insights-key": "multi-key",
+			},
 			envVars: map[string]string{
 				"LOG_FETCH_SIZE":              "100",
 				"BCINSIGHTS_ENVIRONMENT":      "Production",
@@ -197,13 +222,14 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Set environment variables
+			loader, _ := createTestLoaderWithFlags(t, tc.flags)
+
+			// Set environment variables using test helper
 			for key, value := range tc.envVars {
-				os.Setenv(key, value)
-				defer os.Unsetenv(key)
+				t.Setenv(key, value)
 			}
 
-			cfg := LoadConfigWithArgs(tc.args)
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expected.LogFetchSize {
 				t.Errorf("Expected LogFetchSize to be %d, got %d", tc.expected.LogFetchSize, cfg.LogFetchSize)
@@ -219,9 +245,6 @@ func TestLoadConfig_CommandLineFlags(t *testing.T) {
 }
 
 func TestLoadConfig_ConfigFileLoading(t *testing.T) {
-	// Create temporary directory for test config files
-	tempDir := t.TempDir()
-
 	testCases := []struct {
 		name        string
 		fileContent string
@@ -269,15 +292,15 @@ func TestLoadConfig_ConfigFileLoading(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Create test config file
-			configPath := filepath.Join(tempDir, tc.fileName)
-			err := os.WriteFile(configPath, []byte(tc.fileContent), 0o644)
-			if err != nil {
-				t.Fatalf("Failed to create test config file: %v", err)
-			}
+			_, fs := createTestLoader(t)
 
-			// Load config with explicit file path
-			cfg := LoadConfigWithArgs([]string{"--config=" + configPath})
+			// Create test config file in memory filesystem
+			configPath := "/test/" + tc.fileName
+			fs.WriteFile(configPath, []byte(tc.fileContent), 0o644)
+
+			// Create loader that searches this path
+			loader := NewTestConfigLoader(fs, []string{configPath})
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expectedCfg.LogFetchSize {
 				t.Errorf("Expected LogFetchSize to be %d, got %d", tc.expectedCfg.LogFetchSize, cfg.LogFetchSize)
@@ -293,34 +316,22 @@ func TestLoadConfig_ConfigFileLoading(t *testing.T) {
 }
 
 func TestLoadConfig_ConfigFileLocations(t *testing.T) {
-	// Test config file discovery in standard locations
-	originalWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-
-	tempDir := t.TempDir()
-	defer os.Chdir(originalWd)
-
-	// Change to temp directory to isolate test
-	os.Chdir(tempDir)
-
 	testCases := []struct {
 		name         string
-		setupFiles   map[string]string // filename -> content
+		setupFiles   map[string]string // filepath -> content
 		expectedSize int
 	}{
 		{
 			name: "config.json in current directory",
 			setupFiles: map[string]string{
-				"config.json": `{"fetchSize": 111}`,
+				"/test/config.json": `{"fetchSize": 111}`,
 			},
 			expectedSize: 111,
 		},
 		{
-			name: "bc-insights-tui.json in current directory",
+			name: "config.json in home directory",
 			setupFiles: map[string]string{
-				"bc-insights-tui.json": `{"fetchSize": 222}`,
+				"/home/user/.config/bc-insights-tui/config.json": `{"fetchSize": 222}`,
 			},
 			expectedSize: 222,
 		},
@@ -328,20 +339,14 @@ func TestLoadConfig_ConfigFileLocations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Clean up any existing files
-			os.Remove("config.json")
-			os.Remove("bc-insights-tui.json")
+			loader, fs := createTestLoader(t)
 
-			// Create test files
-			for filename, content := range tc.setupFiles {
-				err := os.WriteFile(filename, []byte(content), 0o644)
-				if err != nil {
-					t.Fatalf("Failed to create test file %s: %v", filename, err)
-				}
-				defer os.Remove(filename)
+			// Create test files in memory filesystem
+			for filepath, content := range tc.setupFiles {
+				fs.WriteFile(filepath, []byte(content), 0o644)
 			}
 
-			cfg := LoadConfigWithArgs([]string{})
+			cfg := loader.LoadWithArgs([]string{})
 
 			if cfg.LogFetchSize != tc.expectedSize {
 				t.Errorf("Expected LogFetchSize to be %d, got %d", tc.expectedSize, cfg.LogFetchSize)
@@ -352,37 +357,32 @@ func TestLoadConfig_ConfigFileLocations(t *testing.T) {
 
 func TestLoadConfig_PriorityOrder(t *testing.T) {
 	// Test precedence: flags > env > file > defaults
-	tempDir := t.TempDir()
-	configFile := filepath.Join(tempDir, "priority-test.json")
+	loader, fs := createTestLoader(t)
 
-	// Create config file
+	// Create config file in memory filesystem
 	fileContent := `{
 		"fetchSize": 100,
 		"environment": "FileEnv",
 		"applicationInsightsKey": "file-key"
 	}`
-	err := os.WriteFile(configFile, []byte(fileContent), 0o644)
-	if err != nil {
-		t.Fatalf("Failed to create test config file: %v", err)
+	fs.WriteFile("/test/config.json", []byte(fileContent), 0o644)
+
+	// Set environment variables using test helper
+	t.Setenv("LOG_FETCH_SIZE", "200")
+	t.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
+	t.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKey)
+
+	// Set up mock flags to override some values
+	mockFlags := &ParsedFlags{
+		fetchSize:   intPtr(300),
+		environment: stringPtr(testFlagEnv),
+		// Note: not setting app-insights-key flag to test env wins over file
+	}
+	if mockParser, ok := loader.flagParser.(*MockFlagParser); ok {
+		mockParser.SetFlags(mockFlags)
 	}
 
-	// Set environment variables
-	os.Setenv("LOG_FETCH_SIZE", "200")
-	os.Setenv("BCINSIGHTS_ENVIRONMENT", "EnvEnvironment")
-	os.Setenv("BCINSIGHTS_APP_INSIGHTS_KEY", testEnvKey)
-	defer func() {
-		os.Unsetenv("LOG_FETCH_SIZE")
-		os.Unsetenv("BCINSIGHTS_ENVIRONMENT")
-		os.Unsetenv("BCINSIGHTS_APP_INSIGHTS_KEY")
-	}()
-
-	// Test: file < env < flags
-	cfg := LoadConfigWithArgs([]string{
-		"--config=" + configFile,
-		"--fetch-size=300",
-		"--environment=" + testFlagEnv,
-		// Note: not setting app-insights-key flag to test env wins over file
-	})
+	cfg := loader.LoadWithArgs([]string{})
 
 	// Flag should win for fetchSize and environment
 	if cfg.LogFetchSize != 300 {
@@ -409,10 +409,10 @@ func TestConfig_ValidationRules(t *testing.T) {
 	}{
 		// fetchSize validation
 		{"valid fetchSize", "fetchSize", "100", false, ""},
-		{"invalid fetchSize - negative", "fetchSize", "-10", true, "fetchSize must be a positive integer"},
-		{"invalid fetchSize - zero", "fetchSize", "0", true, "fetchSize must be a positive integer"},
-		{"invalid fetchSize - non-integer", "fetchSize", "abc", true, "fetchSize must be a positive integer"},
-		{"invalid fetchSize - float", "fetchSize", "10.5", true, "fetchSize must be a positive integer"},
+		{"invalid fetchSize - negative", "fetchSize", "-10", true, "fetchSize must be a positive integer, got: -10"},
+		{"invalid fetchSize - zero", "fetchSize", "0", true, "fetchSize must be a positive integer, got: 0"},
+		{"invalid fetchSize - non-integer", "fetchSize", "abc", true, "fetchSize must be a positive integer, got: abc"},
+		{"invalid fetchSize - float", "fetchSize", "10.5", true, "fetchSize must be a positive integer, got: 10.5"},
 
 		// environment validation
 		{"valid environment", "environment", "Production", false, ""},
@@ -433,8 +433,11 @@ func TestConfig_ValidationRules(t *testing.T) {
 			if tc.shouldError {
 				if err == nil {
 					t.Errorf("Expected error for %s=%s, but got none", tc.setting, tc.value)
-				} else if !strings.Contains(err.Error(), tc.expectedMsg) {
-					t.Errorf("Expected error containing %q, got %q", tc.expectedMsg, err.Error())
+				} else if tc.expectedMsg != "" {
+					// Check error message if specified
+					if err.Error() != tc.expectedMsg {
+						t.Errorf("Expected error %q, got %q", tc.expectedMsg, err.Error())
+					}
 				}
 			} else {
 				if err != nil {
@@ -523,23 +526,19 @@ func TestConfig_JSONYAMLRoundtrip(t *testing.T) {
 		}
 	})
 
-	// Test file-based roundtrip
+	// Test file-based roundtrip using in-memory filesystem
 	t.Run("File roundtrip", func(t *testing.T) {
-		tempDir := t.TempDir()
-		configFile := filepath.Join(tempDir, "roundtrip-test.json")
+		_, fs := createTestLoader(t)
 
-		// Write config to file
+		configPath := "/test/roundtrip-test.json"
+
+		// Write config to in-memory file
 		jsonData, _ := json.MarshalIndent(originalCfg, "", "  ")
-		err := os.WriteFile(configFile, jsonData, 0o644)
-		if err != nil {
-			t.Fatalf("Failed to write config file: %v", err)
-		}
+		fs.WriteFile(configPath, jsonData, 0o644)
 
-		// Load config from file
-		loadedCfg, err := loadConfigFromFile(configFile)
-		if err != nil {
-			t.Fatalf("Failed to load config from file: %v", err)
-		}
+		// Load config from in-memory file
+		loader := NewTestConfigLoader(fs, []string{configPath})
+		loadedCfg := loader.LoadWithArgs([]string{})
 
 		// Compare
 		if loadedCfg.LogFetchSize != originalCfg.LogFetchSize {

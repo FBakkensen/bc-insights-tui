@@ -104,88 +104,8 @@ func LoadConfig() Config {
 
 // LoadConfigWithArgs loads configuration with the specified command line arguments
 func LoadConfigWithArgs(args []string) Config {
-	flagSet, flags := setupFlags()
-	_ = flagSet.Parse(args)
-
-	flagsSet := trackSetFlags(flagSet)
-
-	// Start with default values
-	cfg := NewConfig()
-
-	// Load from configuration file if specified or found
-	loadConfigFromFileIfExists(&cfg, *flags.configFile)
-
-	// Override with environment variables
-	applyEnvironmentVariables(&cfg)
-
-	// Override with command line flags (highest priority)
-	applyCommandLineFlags(&cfg, flags, flagsSet)
-
-	return cfg
-}
-
-// setupFlags creates and configures the flag set
-func setupFlags() (*flag.FlagSet, *flagValues) {
-	flagSet := flag.NewFlagSet("bc-insights-tui", flag.ContinueOnError)
-	flagSet.Usage = func() {} // Suppress usage output during tests
-
-	flags := &flagValues{
-		fetchSize:   flagSet.Int(flagFetchSize, -1, "Number of log entries to fetch per request"),
-		environment: flagSet.String(flagEnvironment, "", "Environment name (e.g., Development, Production)"),
-		appInsights: flagSet.String(flagAppInsights, "", "Application Insights connection string"),
-		appID:       flagSet.String(flagAppID, "", "Application Insights App ID"),
-		configFile:  flagSet.String("config", "", "Path to configuration file (JSON)"),
-	}
-
-	return flagSet, flags
-}
-
-// flagValues holds pointers to flag values
-type flagValues struct {
-	fetchSize   *int
-	environment *string
-	appInsights *string
-	appID       *string
-	configFile  *string
-}
-
-// flagsSet tracks which flags were explicitly set
-type flagsSet struct {
-	fetchSize   bool
-	environment bool
-	appInsights bool
-	appID       bool
-}
-
-// trackSetFlags tracks which flags were explicitly set by the user
-func trackSetFlags(flagSet *flag.FlagSet) flagsSet {
-	var flags flagsSet
-	flagSet.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case flagFetchSize:
-			flags.fetchSize = true
-		case flagEnvironment:
-			flags.environment = true
-		case flagAppInsights:
-			flags.appInsights = true
-		case flagAppID:
-			flags.appID = true
-		}
-	})
-	return flags
-}
-
-// loadConfigFromFileIfExists loads configuration from file if it exists
-func loadConfigFromFileIfExists(cfg *Config, configFile string) {
-	if configFile == "" {
-		configFile = findConfigFile()
-	}
-	if configFile != "" {
-		if fileConfig, err := loadConfigFromFile(configFile); err == nil {
-			mergeConfig(cfg, fileConfig)
-		}
-		// Silently ignore file loading errors - not critical
-	}
+	loader := NewConfigLoader()
+	return loader.LoadWithArgs(args)
 }
 
 // applyEnvironmentVariables applies environment variable overrides
@@ -259,114 +179,6 @@ func applyKQLEditorEnvVars(cfg *Config) {
 			cfg.EditorPanelRatio = float32(parsed)
 		}
 	}
-}
-
-// applyCommandLineFlags applies command line flag overrides
-func applyCommandLineFlags(cfg *Config, flags *flagValues, flagsSet flagsSet) {
-	if flagsSet.fetchSize && *flags.fetchSize > 0 { // Only override if positive and explicitly set
-		cfg.LogFetchSize = *flags.fetchSize
-	}
-	if flagsSet.environment { // Allow empty string to override if flag was explicitly set
-		cfg.Environment = *flags.environment
-	}
-	if flagsSet.appInsights { // Allow empty string to override if flag was explicitly set
-		cfg.ApplicationInsightsKey = *flags.appInsights
-	}
-	if flagsSet.appID { // Allow empty string to override if flag was explicitly set
-		cfg.ApplicationInsightsID = *flags.appID
-	}
-}
-
-// findConfigFile looks for configuration files in standard locations
-func findConfigFile() string {
-	// Check current directory first
-	candidates := []string{
-		"config.json",
-		"bc-insights-tui.json",
-	}
-
-	// Add XDG config directory (preferred location)
-	if configDir, err := os.UserConfigDir(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(configDir, configDirName, configFileName),
-		)
-	}
-
-	// Add home directory candidates (legacy locations)
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(homeDir, ".bc-insights-tui", "config.json"),
-			filepath.Join(homeDir, ".bc-insights-tui.json"),
-		)
-	}
-
-	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			// In test mode, skip real user config files to maintain isolation
-			if isRealUserConfig(candidate) {
-				continue
-			}
-			return candidate
-		}
-	}
-
-	return ""
-}
-
-// isTestMode checks if we're running in test mode to enable test isolation
-func isTestMode() bool {
-	// Check for Go test environment
-	return flag.Lookup("test.v") != nil
-}
-
-// isRealUserConfig checks if a path points to a real user config (not test temp dirs)
-func isRealUserConfig(path string) bool {
-	if !isTestMode() {
-		return false // In production, all configs are real
-	}
-
-	// Get the real user directories at the time this function is called
-	// This might be different from what os.UserHomeDir() returns if tests mock it
-	// So let's use a different approach - check if the path contains "Temp" which
-	// indicates it's likely a test temporary directory
-	if strings.Contains(path, "Temp") || strings.Contains(path, "temp") {
-		return false // Temp directories are not real user configs
-	}
-
-	// For now, be conservative and block paths that look like real user directories
-	// This is a simple heuristic but should work for most cases
-	if strings.Contains(path, "AppData") ||
-		strings.Contains(path, "Users") ||
-		(strings.Contains(path, "home") && !strings.Contains(path, "Temp")) {
-
-		// Allow environment variable override for testing in specific environments
-		if override := os.Getenv("BCINSIGHTS_ALLOW_REAL_USER_CONFIG"); override == "true" {
-			return true
-		}
-
-		// If no override, assume it's a real user config based on directory heuristics
-		return true
-	}
-
-	return false
-}
-
-// loadConfigFromFile loads configuration from a JSON file
-func loadConfigFromFile(filename string) (*Config, error) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-
-	// Initialize mutex after unmarshaling
-	cfg.mu = &sync.RWMutex{}
-
-	return &cfg, nil
 }
 
 // mergeConfig merges file configuration into the base config.
@@ -731,6 +543,12 @@ func (c *Config) ListAllSettings() map[string]string {
 	settings["editorPanelRatio"] = fmt.Sprintf("%.2f", c.EditorPanelRatio)
 
 	return settings
+}
+
+// isTestMode checks if we're running in test mode to enable test isolation
+func isTestMode() bool {
+	// Check for Go test environment
+	return flag.Lookup("test.v") != nil
 }
 
 // getConfigFilePath returns the full path to the config file

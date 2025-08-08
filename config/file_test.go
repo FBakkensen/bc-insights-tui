@@ -2,24 +2,13 @@ package config
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
 // Test config file loading, parsing, and discovery functionality
 
 func TestFindConfigFile_CurrentDirectory(t *testing.T) {
-	// Test config file discovery in current directory
-	originalWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-
-	tempDir := t.TempDir()
-	defer os.Chdir(originalWd)
-	os.Chdir(tempDir)
-
+	// Test config file discovery in current directory using dependency injection
 	testCases := []struct {
 		name         string
 		createFiles  []string
@@ -49,20 +38,24 @@ func TestFindConfigFile_CurrentDirectory(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Clean up any existing files
-			os.Remove("config.json")
-			os.Remove("bc-insights-tui.json")
+			// Create isolated filesystem for each test
+			fs := NewMemFileSystem()
 
 			// Create test files
 			for _, filename := range tc.createFiles {
-				err := os.WriteFile(filename, []byte(`{"fetchSize": 1}`), 0o644)
+				err := fs.WriteFile(filename, []byte(`{"fetchSize": 1}`), 0o644)
 				if err != nil {
 					t.Fatalf("Failed to create test file %s: %v", filename, err)
 				}
-				defer os.Remove(filename)
 			}
 
-			result := findConfigFile()
+			// Define search paths for current directory
+			searchPaths := []string{"config.json", "bc-insights-tui.json"}
+
+			// Create test loader with isolated filesystem
+			loader := NewTestConfigLoader(fs, searchPaths)
+
+			result := loader.findConfigFile()
 			if result != tc.expectedFile {
 				t.Errorf("Expected findConfigFile to return %q, got %q", tc.expectedFile, result)
 			}
@@ -71,52 +64,7 @@ func TestFindConfigFile_CurrentDirectory(t *testing.T) {
 }
 
 func TestFindConfigFile_HomeDirectory(t *testing.T) {
-	// Test config file discovery in home directory
-	originalWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-
-	// Create temporary directories to simulate different scenarios
-	tempDir := t.TempDir()
-	homeDir := filepath.Join(tempDir, "home")
-	configDir := filepath.Join(homeDir, ".bc-insights-tui")
-	workingDir := filepath.Join(tempDir, "working")
-
-	err = os.MkdirAll(configDir, 0o755)
-	if err != nil {
-		t.Fatalf("Failed to create config directory: %v", err)
-	}
-	err = os.MkdirAll(workingDir, 0o755)
-	if err != nil {
-		t.Fatalf("Failed to create working directory: %v", err)
-	}
-
-	defer os.Chdir(originalWd)
-	os.Chdir(workingDir)
-
-	// Mock home directory by temporarily setting environment variables
-	// On Unix-like systems, os.UserHomeDir() uses HOME
-	// On Windows, os.UserHomeDir() uses USERPROFILE
-	originalHome := os.Getenv("HOME")
-	originalUserProfile := os.Getenv("USERPROFILE")
-
-	os.Setenv("HOME", homeDir)
-	os.Setenv("USERPROFILE", homeDir)
-
-	defer func() {
-		if originalHome != "" {
-			os.Setenv("HOME", originalHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-		if originalUserProfile != "" {
-			os.Setenv("USERPROFILE", originalUserProfile)
-		} else {
-			os.Unsetenv("USERPROFILE")
-		}
-	}()
-
+	// Test config file discovery in home directory using dependency injection
 	testCases := []struct {
 		name         string
 		createFile   string
@@ -124,26 +72,34 @@ func TestFindConfigFile_HomeDirectory(t *testing.T) {
 	}{
 		{
 			name:         "config in .bc-insights-tui directory",
-			createFile:   filepath.Join(configDir, "config.json"),
-			expectedFile: filepath.Join(configDir, "config.json"),
+			createFile:   "/home/.bc-insights-tui/config.json",
+			expectedFile: "/home/.bc-insights-tui/config.json",
 		},
 		{
 			name:         "config in home directory",
-			createFile:   filepath.Join(homeDir, ".bc-insights-tui.json"),
-			expectedFile: filepath.Join(homeDir, ".bc-insights-tui.json"),
+			createFile:   "/home/.bc-insights-tui.json",
+			expectedFile: "/home/.bc-insights-tui.json",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Create isolated filesystem
+			fs := NewMemFileSystem()
+
 			// Create test file
-			err := os.WriteFile(tc.createFile, []byte(`{"fetchSize": 1}`), 0o644)
+			err := fs.WriteFile(tc.createFile, []byte(`{"fetchSize": 1}`), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file %s: %v", tc.createFile, err)
 			}
-			defer os.Remove(tc.createFile)
 
-			result := findConfigFile()
+			// Define search paths for home directory config files
+			searchPaths := []string{tc.createFile}
+
+			// Create test loader with isolated filesystem
+			loader := NewTestConfigLoader(fs, searchPaths)
+
+			result := loader.findConfigFile()
 			if result != tc.expectedFile {
 				t.Errorf("Expected findConfigFile to return %q, got %q", tc.expectedFile, result)
 			}
@@ -152,7 +108,8 @@ func TestFindConfigFile_HomeDirectory(t *testing.T) {
 }
 
 func TestLoadConfigFromFile_ValidFiles(t *testing.T) {
-	tempDir := t.TempDir()
+	// Create isolated filesystem
+	fs := NewMemFileSystem()
 
 	testCases := []struct {
 		name        string
@@ -208,13 +165,15 @@ func TestLoadConfigFromFile_ValidFiles(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			filename := filepath.Join(tempDir, tc.name+".json")
-			err := os.WriteFile(filename, []byte(tc.content), 0o644)
+			filename := "/test/" + tc.name + ".json"
+			err := fs.WriteFile(filename, []byte(tc.content), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
 
-			config, err := loadConfigFromFile(filename)
+			// Create test loader and load config from file
+			loader := NewTestConfigLoader(fs, []string{})
+			config, err := loader.loadConfigFromFile(filename)
 
 			if tc.shouldError {
 				if err == nil {
@@ -242,7 +201,8 @@ func TestLoadConfigFromFile_ValidFiles(t *testing.T) {
 }
 
 func TestLoadConfigFromFile_InvalidFiles(t *testing.T) {
-	tempDir := t.TempDir()
+	// Create isolated filesystem
+	fs := NewMemFileSystem()
 
 	testCases := []struct {
 		name    string
@@ -268,13 +228,15 @@ func TestLoadConfigFromFile_InvalidFiles(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			filename := filepath.Join(tempDir, tc.name+".json")
-			err := os.WriteFile(filename, []byte(tc.content), 0o644)
+			filename := "/test/" + tc.name + ".json"
+			err := fs.WriteFile(filename, []byte(tc.content), 0o644)
 			if err != nil {
 				t.Fatalf("Failed to create test file: %v", err)
 			}
 
-			_, err = loadConfigFromFile(filename)
+			// Create test loader and load config from file
+			loader := NewTestConfigLoader(fs, []string{})
+			_, err = loader.loadConfigFromFile(filename)
 			if err == nil {
 				t.Errorf("Expected error loading invalid config file %s, got none", tc.name)
 			}
@@ -283,9 +245,14 @@ func TestLoadConfigFromFile_InvalidFiles(t *testing.T) {
 }
 
 func TestLoadConfigFromFile_FileNotFound(t *testing.T) {
+	// Create isolated filesystem
+	fs := NewMemFileSystem()
+
 	nonExistentFile := "/path/that/does/not/exist/config.json"
 
-	_, err := loadConfigFromFile(nonExistentFile)
+	// Create test loader
+	loader := NewTestConfigLoader(fs, []string{})
+	_, err := loader.loadConfigFromFile(nonExistentFile)
 	if err == nil {
 		t.Error("Expected error when loading non-existent file, got none")
 	}
@@ -387,9 +354,9 @@ func TestMergeConfig(t *testing.T) {
 }
 
 func TestConfigFileIntegration(t *testing.T) {
-	// Test the complete config file integration with LoadConfig
-	tempDir := t.TempDir()
-	configFile := filepath.Join(tempDir, "integration.json")
+	// Test the complete config file integration with LoadConfig using dependency injection
+	fs := NewMemFileSystem()
+	configFile := "/test/integration.json"
 
 	// Create config file
 	configData := Config{
@@ -402,13 +369,17 @@ func TestConfigFileIntegration(t *testing.T) {
 		t.Fatalf("Failed to marshal config: %v", err)
 	}
 
-	err = os.WriteFile(configFile, jsonData, 0o644)
+	err = fs.WriteFile(configFile, jsonData, 0o644)
 	if err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
-	// Load config using the file
-	cfg := LoadConfigWithArgs([]string{"--config=" + configFile})
+	// Create test loader and configure it to use our specific config file
+	searchPaths := []string{configFile}
+	loader := NewTestConfigLoader(fs, searchPaths)
+
+	// Load config using the test loader
+	cfg := loader.LoadWithArgs([]string{})
 
 	// Verify file values are loaded
 	if cfg.LogFetchSize != 333 {
