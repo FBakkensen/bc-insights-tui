@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/FBakkensen/bc-insights-tui/auth"
+	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
 // Init starts device flow automatically if no valid token exists.
@@ -24,7 +26,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg)
 	case tea.KeyMsg:
-		// Let textarea consume keys first so typing works
+		// When in list mode, handle Esc and selection differently
+		if m.mode == modeListSubscriptions {
+			return m.handleListKey(msg)
+		}
+		// In chat mode: Let textarea consume keys first so typing works
 		var cmd tea.Cmd
 		m.ta, cmd = m.ta.Update(msg)
 		// Then handle global keys and Enter submission
@@ -36,6 +42,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleAuthSuccess()
 	case authErrorMsg:
 		return m.handleAuthError(msg)
+	case subsLoadedMsg:
+		if msg.err != nil {
+			logging.Error("Failed to load subscriptions", "error", msg.err.Error())
+			m.append("Failed to load subscriptions: " + msg.err.Error())
+			m.mode = modeChat
+			return m, nil
+		}
+		logging.Debug("Received subsLoadedMsg", "itemCount", fmt.Sprintf("%d", len(msg.items)))
+		m.list.SetItems(msg.items)
+		if len(msg.items) == 0 {
+			m.append("No subscriptions found for this account.")
+			m.mode = modeChat
+			return m, nil
+		}
+		logging.Debug("Set items to list", "listItemCount", fmt.Sprintf("%d", len(m.list.Items())))
+		// Stay in list mode and focus list
+		return m, nil
 	}
 	// Let child components update
 	var cmd tea.Cmd
@@ -72,6 +95,8 @@ func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	}
 	m.vp.Width = innerWidth
 	m.vp.Height = vpHeight
+	// size list to same as viewport when active
+	m.list.SetSize(innerWidth, vpHeight)
 	if m.followTail || m.vp.AtBottom() {
 		m.vp.GotoBottom()
 		m.followTail = true
@@ -126,14 +151,43 @@ func (m model) handlePreAuthCommand(input string) (tea.Model, tea.Cmd) {
 func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	switch input {
 	case "help", "?":
-		m.append("Commands: help, login, quit")
+		m.append("Commands: help, subs, login, quit")
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
+	case "subs":
+		// Open subscriptions list panel and load items
+		m.mode = modeListSubscriptions
+		m.list.SetItems(nil)
+		m.append("Loading subscriptions…")
+		return m, m.loadSubscriptionsCmd()
 	default:
 		m.append("Unknown command. Type 'help'.")
 	}
 	return m, nil
+}
+
+// handleListKey processes keys while in subscriptions list mode
+func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeChat
+		m.append("Closed subscriptions panel.")
+		return m, nil
+	case "enter":
+		if sel, ok := m.list.SelectedItem().(subscriptionItem); ok {
+			if err := m.cfg.ValidateAndUpdateSetting(keyAzureSubscriptionID, sel.s.ID); err != nil {
+				m.append("Failed to set subscription: " + err.Error())
+			} else {
+				m.append("Subscription selected: " + sel.s.DisplayName + " (" + sel.s.ID + ")")
+			}
+			m.mode = modeChat
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
 func (m model) handleDeviceCode(msg deviceCodeMsg) (tea.Model, tea.Cmd) {

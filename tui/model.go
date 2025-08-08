@@ -2,15 +2,19 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/config"
+	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
 // model implements the chat-first UI with a top viewport (scrollback) and bottom textarea (input).
@@ -22,6 +26,11 @@ type model struct {
 
 	vp viewport.Model
 	ta textarea.Model
+
+	// top panel alternative components
+	list list.Model
+	mode uiMode
+	cfg  config.Config
 
 	// chat content
 	content string
@@ -44,6 +53,16 @@ type model struct {
 	vpStyle         lipgloss.Style
 	containerStyle  lipgloss.Style
 }
+
+type uiMode int
+
+const (
+	modeChat uiMode = iota
+	modeListSubscriptions
+)
+
+// config keys used in TUI (mirror of config.settingAzureSubscriptionID)
+const keyAzureSubscriptionID = "azure.subscriptionId"
 
 // Run starts the Bubble Tea program with the chat-first model.
 func Run(cfg config.Config) error {
@@ -73,9 +92,19 @@ func initialModel(cfg config.Config) model {
 
 	a := auth.NewAuthenticator(cfg.OAuth2)
 
+	// list setup (will be sized on WindowSizeMsg)
+	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	l.Title = "Select Azure Subscription"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(true)
+	l.SetShowHelp(false)
+
 	m := model{
 		vp:              vp,
 		ta:              ta,
+		list:            l,
+		mode:            modeChat,
+		cfg:             cfg,
 		authenticator:   a,
 		authState:       auth.AuthStateUnknown,
 		maxContentWidth: 120,
@@ -119,6 +148,10 @@ type (
 	}
 	authSuccessMsg struct{}
 	authErrorMsg   struct{ err error }
+	subsLoadedMsg  struct {
+		items []list.Item
+		err   error
+	}
 )
 
 // startAuthCmd begins the device flow.
@@ -155,3 +188,52 @@ func (m *model) pollForTokenCmd() tea.Cmd {
 
 // waitTickCmd emits ticks while waiting during auth.
 // (no waiting ticker needed for now)
+
+// loadSubscriptionsCmd loads Azure subscriptions using the Azure client
+func (m *model) loadSubscriptionsCmd() tea.Cmd {
+	return func() tea.Msg {
+		logging.Debug("Starting subscription loading command")
+
+		// Ensure authenticator is present and can provide ARM-scoped tokens
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		logging.Debug("Creating Azure client with authenticator")
+		client, err := appinsights.NewAzureClientWithAuthenticator(m.authenticator)
+		if err != nil {
+			logging.Error("Failed to create Azure client", "error", err.Error())
+			return subsLoadedMsg{err: fmt.Errorf("failed to create Azure client: %w", err)}
+		}
+
+		logging.Debug("Calling ListSubscriptions")
+		subs, err := client.ListSubscriptions(ctx)
+		if err != nil {
+			logging.Error("Failed to list subscriptions", "error", err.Error())
+			return subsLoadedMsg{err: err}
+		}
+
+		logging.Info("Successfully retrieved subscriptions", "count", fmt.Sprintf("%d", len(subs)))
+		for i, s := range subs {
+			logging.Debug("Subscription found", "index", fmt.Sprintf("%d", i), "id", s.ID, "name", s.DisplayName, "state", s.State)
+		}
+
+		items := make([]list.Item, 0, len(subs))
+		for _, s := range subs {
+			// Wrap into list item adapter
+			s := s
+			items = append(items, subscriptionItem{s: s})
+		}
+
+		logging.Debug("Returning subscription items", "itemCount", fmt.Sprintf("%d", len(items)))
+		return subsLoadedMsg{items: items}
+	}
+}
+
+// subscriptionItem adapts AzureSubscription to list.Item
+type subscriptionItem struct{ s appinsights.AzureSubscription }
+
+func (i subscriptionItem) FilterValue() string { return i.s.DisplayName }
+func (i subscriptionItem) Title() string       { return i.s.DisplayName }
+func (i subscriptionItem) Description() string {
+	return fmt.Sprintf("ID: %s | State: %s", i.s.ID, i.s.State)
+}

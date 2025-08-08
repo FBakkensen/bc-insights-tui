@@ -1,20 +1,32 @@
 package appinsights
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"golang.org/x/oauth2"
 )
 
+const testAppID = "test-app-id"
+
+// mockAuthenticator implements ApplicationInsightsAuthenticator for testing
+type mockAuthenticator struct {
+	token *oauth2.Token
+	err   error
+}
+
+func (m *mockAuthenticator) GetApplicationInsightsToken(ctx context.Context) (*oauth2.Token, error) {
+	return m.token, m.err
+}
+
 func TestNewClient(t *testing.T) {
 	token := &oauth2.Token{
 		AccessToken: "test-token",
 		Expiry:      time.Now().Add(time.Hour),
 	}
-	appID := "test-app-id"
 
-	client := NewClient(token, appID)
+	client := NewClient(token, testAppID)
 
 	if client == nil {
 		t.Fatal("Expected non-nil client")
@@ -24,8 +36,8 @@ func TestNewClient(t *testing.T) {
 		t.Error("Expected token to be set correctly")
 	}
 
-	if client.appID != appID {
-		t.Errorf("Expected appID %q, got %q", appID, client.appID)
+	if client.appID != testAppID {
+		t.Errorf("Expected appID %q, got %q", testAppID, client.appID)
 	}
 
 	if client.baseURL != "https://api.applicationinsights.io" {
@@ -35,6 +47,97 @@ func TestNewClient(t *testing.T) {
 	if client.httpClient == nil {
 		t.Error("Expected HTTP client to be initialized")
 	}
+
+	if client.auth != nil {
+		t.Error("Expected auth to be nil for regular client")
+	}
+}
+
+func TestNewClientWithAuthenticator(t *testing.T) {
+	token := &oauth2.Token{
+		AccessToken: "test-token",
+		Expiry:      time.Now().Add(time.Hour),
+	}
+	auth := &mockAuthenticator{token: token}
+
+	client := NewClientWithAuthenticator(auth, testAppID)
+
+	if client == nil {
+		t.Fatal("Expected non-nil client")
+	}
+
+	if client.token != nil {
+		t.Error("Expected token to be nil initially for authenticator client")
+	}
+
+	if client.appID != testAppID {
+		t.Errorf("Expected appID %q, got %q", testAppID, client.appID)
+	}
+
+	if client.baseURL != "https://api.applicationinsights.io" {
+		t.Errorf("Expected base URL to be https://api.applicationinsights.io, got %q", client.baseURL)
+	}
+
+	if client.httpClient == nil {
+		t.Error("Expected HTTP client to be initialized")
+	}
+
+	if client.auth != auth {
+		t.Error("Expected auth to be set correctly")
+	}
+}
+
+func TestGetValidToken(t *testing.T) {
+	t.Run("valid stored token", func(t *testing.T) {
+		token := &oauth2.Token{
+			AccessToken: "test-token",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+		client := NewClient(token, testAppID)
+
+		validToken, err := client.getValidToken(context.Background())
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if validToken != token {
+			t.Error("Expected to get the stored token")
+		}
+	})
+
+	t.Run("expired token with authenticator", func(t *testing.T) {
+		newToken := &oauth2.Token{
+			AccessToken: "new-token",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+		auth := &mockAuthenticator{token: newToken}
+		client := NewClientWithAuthenticator(auth, testAppID)
+
+		// Set an expired token
+		client.token = &oauth2.Token{
+			AccessToken: "expired-token",
+			Expiry:      time.Now().Add(-time.Hour),
+		}
+
+		validToken, err := client.getValidToken(context.Background())
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if validToken != newToken {
+			t.Error("Expected to get the new token from authenticator")
+		}
+		if client.token != newToken {
+			t.Error("Expected token to be cached in client")
+		}
+	})
+
+	t.Run("no token and no authenticator", func(t *testing.T) {
+		client := NewClient(nil, testAppID)
+
+		_, err := client.getValidToken(context.Background())
+		if err == nil {
+			t.Error("Expected error when no token and no authenticator")
+		}
+	})
 }
 
 func TestValidateQuery_EmptyQuery(t *testing.T) {

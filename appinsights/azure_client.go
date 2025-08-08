@@ -4,6 +4,8 @@ package appinsights
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -13,6 +15,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/applicationinsights/armapplicationinsights"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
+	"github.com/FBakkensen/bc-insights-tui/auth"
+	"github.com/FBakkensen/bc-insights-tui/logging"
 	"golang.org/x/oauth2"
 )
 
@@ -92,6 +96,67 @@ func (c *oauth2TokenCredential) GetToken(ctx context.Context, _ policy.TokenRequ
 		Token:     c.token.AccessToken,
 		ExpiresOn: c.token.Expiry,
 	}, nil
+}
+
+// authenticatorCredential implements azcore.TokenCredential using our Authenticator, supporting audience-specific scopes.
+type authenticatorCredential struct {
+	auth *auth.Authenticator
+}
+
+func (c *authenticatorCredential) GetToken(ctx context.Context, tro policy.TokenRequestOptions) (azcore.AccessToken, error) {
+	// tro.Scopes contains requested resource scopes (e.g., https://management.azure.com/.default)
+	scopes := tro.Scopes
+	if len(scopes) == 0 {
+		// Fallback to ARM default scope
+		scopes = []string{"https://management.azure.com/.default"}
+	}
+	// Normalize scopes: prefer management.azure.com and collapse accidental double slashes
+	norm := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		s = strings.ReplaceAll(s, "https://management.core.windows.net", "https://management.azure.com")
+		s = strings.ReplaceAll(s, "//.default", "/.default")
+		norm = append(norm, s)
+	}
+	logging.Debug("ARM credential requesting token", "scopes", strings.Join(norm, " "))
+	tok, err := c.auth.GetTokenForScopes(ctx, norm)
+	if err != nil {
+		logging.Error("Failed to get ARM-scoped token", "error", err.Error())
+		// Provide more helpful error context for authentication issues
+		if strings.Contains(err.Error(), "consent_required") || strings.Contains(err.Error(), "AADSTS65001") {
+			return azcore.AccessToken{}, fmt.Errorf("azure Management API access not authorized: please run 'login' command to grant required permissions")
+		}
+		if strings.Contains(err.Error(), "refresh request failed") {
+			return azcore.AccessToken{}, fmt.Errorf("authentication token expired: please run 'login' command to re-authenticate")
+		}
+		return azcore.AccessToken{}, err
+	}
+	// Lightweight claims decoding for diagnostics only
+	if tok != nil && tok.AccessToken != "" {
+		// best-effort decode of JWT payload
+		parts := strings.Split(tok.AccessToken, ".")
+		if len(parts) >= 2 {
+			if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+				var claims map[string]interface{}
+				if err := json.Unmarshal(payload, &claims); err == nil {
+					logging.Debug("ARM token claims",
+						"aud", fmt.Sprint(claims["aud"]),
+						"scp", fmt.Sprint(claims["scp"]),
+						"tid", fmt.Sprint(claims["tid"]))
+				}
+			}
+		}
+		logging.Debug("ARM token expiry", "expires", tok.Expiry.Format(time.RFC3339))
+	}
+	logging.Debug("ARM credential returning token successfully")
+	return azcore.AccessToken{Token: tok.AccessToken, ExpiresOn: tok.Expiry}, nil
+}
+
+// NewAzureClientWithAuthenticator builds an AzureClient backed by the authenticator for dynamic scopes
+func NewAzureClientWithAuthenticator(a *auth.Authenticator) (*AzureClient, error) {
+	if a == nil {
+		return nil, fmt.Errorf("authenticator is nil")
+	}
+	return &AzureClient{credential: &authenticatorCredential{auth: a}}, nil
 }
 
 // ListApplicationInsightsResources lists all Application Insights resources accessible to the authenticated user
@@ -272,22 +337,39 @@ func (r *ApplicationInsightsResource) FormatResourceForDisplay() string {
 
 // ListSubscriptions lists all Azure subscriptions accessible to the authenticated user
 func (c *AzureClient) ListSubscriptions(ctx context.Context) ([]AzureSubscription, error) {
+	logging.Debug("ListSubscriptions called")
+
 	client, err := armsubscriptions.NewClient(c.credential, nil)
 	if err != nil {
+		logging.Error("Failed to create subscriptions client", "error", err.Error())
 		return nil, fmt.Errorf("failed to create subscriptions client: %w", err)
 	}
 
+	logging.Debug("Created ARM subscriptions client, starting to list subscriptions")
 	var subscriptions []AzureSubscription
 	pager := client.NewListPager(nil)
 
+	pageCount := 0
 	for pager.More() {
+		pageCount++
+		logging.Debug("Fetching subscription page", "pageNumber", fmt.Sprintf("%d", pageCount))
+
 		page, err := pager.NextPage(ctx)
 		if err != nil {
+			logging.Error("Failed to get subscriptions page", "pageNumber", fmt.Sprintf("%d", pageCount), "error", err.Error())
 			return nil, fmt.Errorf("failed to get subscriptions page: %w", err)
 		}
 
-		for _, sub := range page.Value {
+		logging.Debug("Received subscription page", "pageNumber", fmt.Sprintf("%d", pageCount), "subscriptionsInPage", fmt.Sprintf("%d", len(page.Value)))
+
+		for i, sub := range page.Value {
+			logging.Debug("Processing subscription from page", "pageNumber", fmt.Sprintf("%d", pageCount), "subscriptionIndex", fmt.Sprintf("%d", i),
+				"hasSubscriptionID", fmt.Sprintf("%v", sub.SubscriptionID != nil),
+				"hasDisplayName", fmt.Sprintf("%v", sub.DisplayName != nil),
+				"hasState", fmt.Sprintf("%v", sub.State != nil))
+
 			if sub.SubscriptionID == nil || sub.DisplayName == nil || sub.State == nil {
+				logging.Warn("Skipping incomplete subscription data", "pageNumber", fmt.Sprintf("%d", pageCount), "subscriptionIndex", fmt.Sprintf("%d", i))
 				continue // Skip incomplete subscription data
 			}
 
@@ -305,10 +387,12 @@ func (c *AzureClient) ListSubscriptions(ctx context.Context) ([]AzureSubscriptio
 			// Set name (use DisplayName as fallback)
 			subscription.Name = subscription.DisplayName
 
+			logging.Debug("Added subscription", "id", subscription.ID, "displayName", subscription.DisplayName, "state", subscription.State)
 			subscriptions = append(subscriptions, subscription)
 		}
 	}
 
+	logging.Info("ListSubscriptions completed", "totalSubscriptions", fmt.Sprintf("%d", len(subscriptions)), "pagesProcessed", fmt.Sprintf("%d", pageCount))
 	return subscriptions, nil
 }
 

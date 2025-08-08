@@ -371,6 +371,7 @@ func TestListAllSettings(t *testing.T) {
 		"fetchSize", "environment", "applicationInsightsKey", "applicationInsightsAppId",
 		"oauth2.tenantId", "oauth2.clientId", "oauth2.scopes",
 		"queryHistoryMaxEntries", "queryTimeoutSeconds", "queryHistoryFile", "editorPanelRatio",
+		"azure.subscriptionId",
 	}
 	for _, expectedSetting := range expectedSettings {
 		if _, exists := settings[expectedSetting]; !exists {
@@ -398,13 +399,13 @@ func TestListAllSettings(t *testing.T) {
 	if settings["oauth2.clientId"] != "3b065ad6-067e-41f2-8cf7-19ddb0548a99" {
 		t.Errorf("Expected oauth2.clientId to be the default value, got %q", settings["oauth2.clientId"])
 	}
-	if settings["oauth2.scopes"] != "https://api.applicationinsights.io/Data.Read" {
+	if settings["oauth2.scopes"] != "https://management.azure.com/user_impersonation" {
 		t.Errorf("Expected oauth2.scopes to be the default value, got %q", settings["oauth2.scopes"])
 	}
 
 	// Check that no unexpected settings are present
-	if len(settings) != 11 {
-		t.Errorf("Expected exactly 11 settings, got %d: %v", len(settings), settings)
+	if len(settings) != 12 {
+		t.Errorf("Expected exactly 12 settings, got %d: %v", len(settings), settings)
 	}
 }
 

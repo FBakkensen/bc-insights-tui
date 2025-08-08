@@ -32,7 +32,7 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 - [x] Research and write clean-slate plan
 - [x] Add deletion-first step to the plan
 - [x] Step 0: Remove existing UI and UI tests
-- [ ] Step 1: Login (device flow)
+- [x] Step 1: Login (device flow)
 - [ ] Step 2: Select subscription
 - [ ] Step 3: Select Application Insights resource
 - [ ] Step 4: Set / Get configuration
@@ -57,8 +57,8 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
   - Esc/Ctrl+C quits gracefully.
 
 ### Step 2 — Select subscription
-- After login, list subscriptions. Prefer non-modal list as the active top panel using bubbles/list (title, filter, pagination). Esc returns to chat.
-- Selecting a subscription posts a confirmation to the scrollback and moves to resource selection.
+- After login, list azure subscriptions to select a subscription and update config with subscription id.
+- if following the intention of bubble tea i would like a list in the viewport to select from. https://github.com/charmbracelet/bubbletea/tree/main/examples/list-simple
 
 ### Step 3 — Select Azure Application Insights resource
 - Similar to subscriptions: show insights components for the chosen subscription in a list panel.

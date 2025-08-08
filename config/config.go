@@ -39,6 +39,9 @@ const (
 
 	// Common strings
 	notSetValue = "(not set)"
+
+	// Internal setting keys
+	settingAzureSubscriptionID = "azure.subscriptionId"
 )
 
 // OAuth2Config holds OAuth2 authentication settings
@@ -55,6 +58,7 @@ type Config struct {
 	Environment            string        `json:"environment" yaml:"environment"`
 	ApplicationInsightsKey string        `json:"applicationInsightsKey" yaml:"applicationInsightsKey"`
 	ApplicationInsightsID  string        `json:"applicationInsightsAppId" yaml:"applicationInsightsAppId"`
+	SubscriptionID         string        `json:"subscriptionId" yaml:"subscriptionId"`
 	OAuth2                 OAuth2Config  `json:"oauth2" yaml:"oauth2"`
 	QueryHistoryMaxEntries int           `json:"queryHistoryMaxEntries" yaml:"queryHistoryMaxEntries"`
 	QueryTimeoutSeconds    int           `json:"queryTimeoutSeconds" yaml:"queryTimeoutSeconds"`
@@ -70,10 +74,13 @@ func NewConfig() Config {
 		Environment:            "Development",
 		ApplicationInsightsKey: "",
 		ApplicationInsightsID:  "",
+		SubscriptionID:         "",
 		OAuth2: OAuth2Config{
 			TenantID: "e48da249-7c64-41ec-8c89-cea18b6608fa",
 			ClientID: "3b065ad6-067e-41f2-8cf7-19ddb0548a99",
-			Scopes:   []string{"https://api.applicationinsights.io/Data.Read"},
+			Scopes: []string{
+				"https://management.azure.com/user_impersonation",
+			},
 		},
 		QueryHistoryMaxEntries: 100,
 		QueryTimeoutSeconds:    30,
@@ -200,6 +207,14 @@ func applyBasicEnvVars(cfg *Config) {
 	if _, exists := os.LookupEnv("BCINSIGHTS_APP_INSIGHTS_ID"); exists {
 		cfg.ApplicationInsightsID = os.Getenv("BCINSIGHTS_APP_INSIGHTS_ID") // Allow empty string
 	}
+	// Subscription ID from common env vars
+	if v := os.Getenv("AZURE_SUBSCRIPTION_ID"); v != "" {
+		cfg.SubscriptionID = v
+	} else if v := os.Getenv("BCINSIGHTS_AZURE_SUBSCRIPTION_ID"); v != "" {
+		cfg.SubscriptionID = v
+	} else if v := os.Getenv("ARM_SUBSCRIPTION_ID"); v != "" {
+		cfg.SubscriptionID = v
+	}
 }
 
 // applyOAuth2EnvVars applies OAuth2 configuration environment variables
@@ -315,6 +330,9 @@ func mergeConfig(base, file *Config) {
 	if file.ApplicationInsightsID != "" {
 		base.ApplicationInsightsID = file.ApplicationInsightsID
 	}
+	if file.SubscriptionID != "" {
+		base.SubscriptionID = file.SubscriptionID
+	}
 
 	// Merge OAuth2 configuration
 	if file.OAuth2.TenantID != "" {
@@ -368,7 +386,7 @@ func (c *Config) ValidateAndUpdateSetting(name, value string) error {
 // isBasicSetting checks if the setting name is a basic configuration setting
 func (c *Config) isBasicSetting(name string) bool {
 	switch name {
-	case settingFetchSize, settingEnvironment, settingApplicationInsights, settingApplicationID:
+	case settingFetchSize, settingEnvironment, settingApplicationInsights, settingApplicationID, settingAzureSubscriptionID:
 		return true
 	default:
 		return false
@@ -419,6 +437,13 @@ func (c *Config) validateBasicSetting(name, value string) error {
 	case settingApplicationID:
 		// Allow empty for clearing the ID
 		c.ApplicationInsightsID = value
+	case settingAzureSubscriptionID:
+		// Basic non-empty validation
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return fmt.Errorf("azure.subscriptionId cannot be empty")
+		}
+		c.SubscriptionID = trimmed
 	default:
 		return fmt.Errorf("unknown basic setting: %s", name)
 	}
@@ -539,6 +564,11 @@ func (c *Config) getBasicSettingValue(name string) (string, error) {
 			return notSetValue, nil
 		}
 		return c.ApplicationInsightsID, nil
+	case settingAzureSubscriptionID:
+		if c.SubscriptionID == "" {
+			return notSetValue, nil
+		}
+		return c.SubscriptionID, nil
 	default:
 		return "", fmt.Errorf("unknown basic setting: %s", name)
 	}
@@ -605,6 +635,11 @@ func (c *Config) ListAllSettings() map[string]string {
 		settings["applicationInsightsAppId"] = notSetValue
 	} else {
 		settings["applicationInsightsAppId"] = c.ApplicationInsightsID
+	}
+	if c.SubscriptionID == "" {
+		settings[settingAzureSubscriptionID] = notSetValue
+	} else {
+		settings[settingAzureSubscriptionID] = c.SubscriptionID
 	}
 
 	// OAuth2 settings

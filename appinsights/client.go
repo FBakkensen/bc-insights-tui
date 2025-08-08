@@ -9,10 +9,16 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 )
+
+// ApplicationInsightsAuthenticator represents an interface for acquiring Application Insights API tokens
+type ApplicationInsightsAuthenticator interface {
+	GetApplicationInsightsToken(ctx context.Context) (*oauth2.Token, error)
+}
 
 // Client represents an Application Insights API client
 type Client struct {
@@ -20,6 +26,8 @@ type Client struct {
 	token      *oauth2.Token
 	appID      string
 	baseURL    string
+	auth       ApplicationInsightsAuthenticator
+	mu         sync.Mutex // Protects token field from concurrent access
 }
 
 // QueryRequest represents a KQL query request
@@ -57,10 +65,26 @@ func NewClient(token *oauth2.Token, appID string) *Client {
 	}
 }
 
+// NewClientWithAuthenticator creates a new Application Insights client that will automatically
+// acquire the proper Application Insights API token using the v1 endpoint
+func NewClientWithAuthenticator(authenticator ApplicationInsightsAuthenticator, appID string) *Client {
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		token:   nil, // Will be acquired on-demand
+		appID:   appID,
+		baseURL: "https://api.applicationinsights.io",
+		auth:    authenticator,
+	}
+}
+
 // ExecuteQuery executes a KQL query against Application Insights
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse, error) {
-	if c.token == nil || !c.token.Valid() {
-		return nil, fmt.Errorf("no valid authentication token available")
+	// Get a valid token, either from stored token or via authenticator
+	token, err := c.getValidToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get valid authentication token: %w", err)
 	}
 
 	// Prepare the request
@@ -81,7 +105,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token.AccessToken)
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
 	// Execute request
 	resp, err := c.httpClient.Do(req)
@@ -108,6 +132,31 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	}
 
 	return &queryResp, nil
+}
+
+// getValidToken returns a valid token, acquiring one via authenticator if needed
+func (c *Client) getValidToken(ctx context.Context) (*oauth2.Token, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// If we have a valid stored token, use it
+	if c.token != nil && c.token.Valid() {
+		return c.token, nil
+	}
+
+	// If we have an authenticator, use it to get a new token
+	if c.auth != nil {
+		token, err := c.auth.GetApplicationInsightsToken(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to acquire Application Insights token: %w", err)
+		}
+		// Cache the token for future use
+		c.token = token
+		return token, nil
+	}
+
+	// No valid token available
+	return nil, fmt.Errorf("no valid authentication token available and no authenticator provided")
 }
 
 // ValidateQuery performs basic KQL syntax validation

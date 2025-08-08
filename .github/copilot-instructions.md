@@ -7,6 +7,7 @@ Do-first for agents
 - Always plan with the Todos tool; track each step separately.
 - Clean build gate: run `make all` (lint → race tests → build). Zero warnings, all tests green.
 - Research first: use Context7 + Perplexity + official Bubble Tea/Bubbles docs (and search charm repos) before changing linters, OAuth, or Bubble Tea patterns.
+- **CRITICAL: AI agents CANNOT run interactive TUI mode** - the app will hang waiting for keyboard input. Only use `./bc-insights-tui.exe -run=COMMAND` for testing. If interactive TUI testing is needed, ask the user to test it manually.
 
 Architecture (big picture)
 - Go + Charm ecosystem. Entry: `main.go` → init `logging` → load `config` → (future) start chat-first UI.
@@ -20,6 +21,7 @@ Architecture (big picture)
 Workflows that matter
 - Build/test/lint: `make build`, `make test`, `make race`, `make lint`, `make all` (CI-equivalent). UI-specific targets: `make ui-test` (when UI exists).
 - Run (Windows): `./bc-insights-tui.exe`. It currently prints a Step 0 placeholder.
+- **Non-interactive mode: `./bc-insights-tui.exe -run=COMMAND` for testing/automation without TUI. Commands: `subs` (list subscriptions), `login` (device flow auth). MANDATORY for AI agents - never run interactive mode as it hangs waiting for keyboard input.**
 - Config examples (env): `LOG_FETCH_SIZE`, `BCINSIGHTS_ENVIRONMENT`, `BCINSIGHTS_APP_INSIGHTS_ID`, OAuth: `BCINSIGHTS_OAUTH2_TENANT_ID`, `BCINSIGHTS_OAUTH2_CLIENT_ID`, `BCINSIGHTS_OAUTH2_SCOPES`.
 
 UI conventions (chat-first)
