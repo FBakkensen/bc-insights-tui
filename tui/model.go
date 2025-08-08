@@ -434,17 +434,20 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 		"fetch_size", fmt.Sprintf("%d", fetch),
 	)
 
+	// Perform preflight outside the closure to avoid capturing m
+	if err := m.preflightKQL(appID); err != nil {
+		logging.Error("KQL preflight failed", "error", err.Error())
+		return func() tea.Msg { return kqlResultMsg{err: err} }
+	}
+	// Construct client once and capture it immutably for the closure
+	client := m.getKQLClient(appID)
+
 	return func() tea.Msg {
 		deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
 		logging.Debug("KQL command starting",
 			"appId_len", fmt.Sprintf("%d", len(strings.TrimSpace(appID))),
 			"deadline", deadline.Format(time.RFC3339),
 		)
-		if err := m.preflightKQL(appID); err != nil {
-			logging.Error("KQL preflight failed", "error", err.Error())
-			return kqlResultMsg{err: err}
-		}
-		client := m.getKQLClient(appID)
 		if err := client.ValidateQuery(query); err != nil {
 			logging.Error("KQL validation failed", "error", err.Error())
 			return kqlResultMsg{err: err}

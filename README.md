@@ -94,6 +94,25 @@ make all     # Run lint, race, and build (default)
 
 **For AI Coding Agents**: Use these standardized commands for consistent build/test/lint operations across different development environments.
 
+### Automation compliance (AI agents)
+
+AI agents must not run the interactive TUI. To comply with organizational automation standards and to avoid hanging on interactive input, always use the non-interactive runner with -run=COMMAND.
+
+Example (non-interactive invocations):
+
+```bash
+# Authenticate using device flow without launching the TUI
+./bc-insights-tui.exe -run=login
+
+# List subscriptions (prints to stdout); do NOT start interactive UI
+./bc-insights-tui.exe -run=subs
+
+# After selecting and saving config via non-interactive commands, you can run other commands similarly
+# e.g., future: ./bc-insights-tui.exe -run=kql:"traces | take 5"
+```
+
+Never invoke ./bc-insights-tui (without -run) from automation or AI tooling.
+
 ### Configuration
 
 The application uses environment variables with fallback defaults:
