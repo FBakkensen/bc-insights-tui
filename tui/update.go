@@ -258,8 +258,17 @@ func (m model) handleConfigSubcommand(sub string) (tea.Model, tea.Cmd) {
 		oldVal, _ := m.cfg.GetSettingValue(key)
 
 		if err := m.cfg.ValidateAndUpdateSetting(key, value); err != nil {
-			m.append("Failed to update setting: " + err.Error())
-			m.append("Tip: type 'config' to see available settings or 'config get " + key + "'.")
+			// Check if this is a persistence error vs validation error
+			if strings.Contains(err.Error(), "setting updated in memory but failed to save to file") {
+				// Get the updated value since it was changed in memory
+				newVal, _ := m.cfg.GetSettingValue(key)
+				logging.Error("Failed to persist config", "key", key, "error", err.Error())
+				m.append("Updated " + key + " (old: " + oldVal + ", new: " + newVal + "), but failed to save: " + err.Error() + ". Check file permissions and disk space.")
+			} else {
+				// Validation error
+				m.append("Failed to update setting: " + err.Error())
+				m.append("Tip: type 'config' to see available settings or 'config get " + key + "'.")
+			}
 			return m, nil
 		}
 
