@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -41,7 +42,7 @@ func InitLogger(logLevel string) error {
 	timestamp := time.Now().Format("2006-01-02")
 	logFileName := filepath.Join(logsDir, fmt.Sprintf("bc-insights-tui-%s.log", timestamp))
 
-	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	logFile, err := os.OpenFile(logFileName, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -56,7 +57,8 @@ func InitLogger(logLevel string) error {
 
 	multiWriter := io.MultiWriter(writers...)
 
-	logger := log.New(multiWriter, "", log.LstdFlags|log.Lshortfile)
+	// Use standard flags only; we'll inject caller info manually to get real call site
+	logger := log.New(multiWriter, "", log.LstdFlags)
 
 	globalLogger = &Logger{
 		logger:   logger,
@@ -99,7 +101,13 @@ func shouldLog(level string) bool {
 
 // formatMessage formats a log message with key-value pairs
 func formatMessage(level, message string, keyValues ...string) string {
-	msg := fmt.Sprintf("[%s] %s", level, message)
+	// Determine real caller site: skip 2 to jump over Debug/Info/Warn/Error and formatMessage itself
+	file, line := callerSite(2)
+	prefix := ""
+	if file != "" {
+		prefix = fmt.Sprintf("%s:%d ", file, line)
+	}
+	msg := fmt.Sprintf("[%s] %s%s", level, prefix, message)
 
 	// Add key-value pairs
 	for i := 0; i < len(keyValues)-1; i += 2 {
@@ -109,6 +117,17 @@ func formatMessage(level, message string, keyValues ...string) string {
 	}
 
 	return msg
+}
+
+// callerSite returns a short file:line of the true call site.
+func callerSite(skip int) (string, int) {
+	// skip base accounts for this function, formatMessage, and the exported log helper
+	// The provided skip should be 2 from the public helpers; add 1 for this frame
+	_, file, line, ok := runtime.Caller(skip + 1)
+	if !ok {
+		return "", 0
+	}
+	return filepath.Base(file), line
 }
 
 // Debug logs a debug message

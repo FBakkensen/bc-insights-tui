@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/applicationinsights/armapplicationinsights"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armsubscriptions"
 	"golang.org/x/oauth2"
@@ -62,14 +63,34 @@ func NewAzureClient(token *oauth2.Token) (*AzureClient, error) {
 		return nil, fmt.Errorf("no authentication token provided")
 	}
 
-	// Create a credential from the OAuth2 token
-	credential, err := azidentity.NewDefaultAzureCredential(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Azure credential: %w", err)
+	if !token.Valid() {
+		return nil, fmt.Errorf("provided authentication token is not valid or expired")
 	}
 
-	return &AzureClient{
-		credential: credential,
+	// Wrap the provided OAuth2 token in an azcore.TokenCredential
+	credential := &oauth2TokenCredential{token: token}
+
+	return &AzureClient{credential: credential}, nil
+}
+
+// oauth2TokenCredential is a minimal azcore.TokenCredential implementation that
+// returns a pre-acquired OAuth2 access token.
+type oauth2TokenCredential struct {
+	token *oauth2.Token
+}
+
+// GetToken implements azcore.TokenCredential.
+func (c *oauth2TokenCredential) GetToken(ctx context.Context, _ policy.TokenRequestOptions) (azcore.AccessToken, error) {
+	if c == nil || c.token == nil {
+		return azcore.AccessToken{}, fmt.Errorf("no token available")
+	}
+	// Ensure token hasn't expired. We don't attempt refresh here; the caller should ensure validity.
+	if c.token.Expiry.IsZero() || time.Until(c.token.Expiry) <= 0 {
+		return azcore.AccessToken{}, fmt.Errorf("token expired")
+	}
+	return azcore.AccessToken{
+		Token:     c.token.AccessToken,
+		ExpiresOn: c.token.Expiry,
 	}, nil
 }
 

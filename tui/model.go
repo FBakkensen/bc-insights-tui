@@ -122,7 +122,7 @@ type (
 )
 
 // startAuthCmd begins the device flow.
-func (m model) startAuthCmd() tea.Cmd {
+func (m *model) startAuthCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		resp, err := m.authenticator.InitiateDeviceFlow(ctx)
@@ -137,7 +137,7 @@ func (m model) startAuthCmd() tea.Cmd {
 // bottom-aligning for short content intentionally removed for Option 1.
 
 // pollForTokenCmd runs the blocking PollForToken and signals when done.
-func (m model) pollForTokenCmd() tea.Cmd {
+func (m *model) pollForTokenCmd() tea.Cmd {
 	deviceCode := m.deviceResp.DeviceCode
 	interval := m.deviceResp.Interval
 	ctx := m.authCtx

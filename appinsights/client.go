@@ -59,8 +59,8 @@ func NewClient(token *oauth2.Token, appID string) *Client {
 
 // ExecuteQuery executes a KQL query against Application Insights
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse, error) {
-	if c.token == nil {
-		return nil, fmt.Errorf("no authentication token available")
+	if c.token == nil || !c.token.Valid() {
+		return nil, fmt.Errorf("no valid authentication token available")
 	}
 
 	// Prepare the request
