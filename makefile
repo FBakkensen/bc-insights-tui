@@ -1,4 +1,4 @@
-.PHONY: build test lint clean fmt vet race all help
+.PHONY: build test lint clean fmt vet race all help ui-test ui-verify
 
 # Default target
 all: lint race build
@@ -37,16 +37,23 @@ vet:
 clean:
 	@echo "🧹 Cleaning build artifacts..."
 	rm -f bc-insights-tui.exe bc-insights-tui.test.exe
+	rm -rf ui_test_output ui_verification_reports custom_ui_output custom_reports
+
+# Run UI tests specifically
+ui-test:
+	@echo "🎨 Running UI visual tests..."
+	go test -v ./tui/ -run "TestUI.*"
 
 # Show help
 help:
 	@echo "Available targets:"
-	@echo "  build  - Build the application"
-	@echo "  test   - Run tests"
-	@echo "  race   - Run tests with race detection"
-	@echo "  lint   - Run complete quality checks (fmt, vet, golangci-lint)"
-	@echo "  fmt    - Format code"
-	@echo "  vet    - Run go vet"
-	@echo "  clean  - Clean build artifacts"
-	@echo "  all    - Run lint, test, and build (default)"
-	@echo "  help   - Show this help"
+	@echo "  build      - Build the application"
+	@echo "  test       - Run tests"
+	@echo "  race       - Run tests with race detection"
+	@echo "  lint       - Run complete quality checks (fmt, vet, golangci-lint)"
+	@echo "  fmt        - Format code"
+	@echo "  vet        - Run go vet"
+	@echo "  clean      - Clean build artifacts and UI test outputs"
+	@echo "  ui-test    - Run UI visual tests"
+	@echo "  all        - Run lint, test, and build (default)"
+	@echo "  help       - Show this help"

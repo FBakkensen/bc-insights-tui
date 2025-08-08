@@ -76,6 +76,10 @@ coverage.html
 coverage.out
 profile.out
 
+# UI test output files (for debugging, preserved after tests)
+ui_test_output/
+custom_ui_output/
+
 # Development and debugging
 debug
 debug.exe

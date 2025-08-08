@@ -1,326 +1,230 @@
 package tui
 
-// Update logic for Bubble Tea TUI
-
 import (
-	"context"
 	"fmt"
 	"strings"
-	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/FBakkensen/bc-insights-tui/auth"
-	tea "github.com/charmbracelet/bubbletea"
-	"golang.org/x/oauth2"
+	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
-const (
-	// Key combinations
-	quitKey = "ctrl+c"
-)
-
-// Message types for authentication flow
-type authCheckMsg struct {
-	hasValidToken bool
-}
-
-type deviceCodeMsg struct {
-	deviceCode *auth.DeviceCodeResponse
-	err        error
-}
-
-type authCompleteMsg struct {
-	token *oauth2.Token
-	err   error
-}
-
-type authInitiateMsg struct{}
-
-// Commands for authentication flow
-func checkAuthStatus(authenticator *auth.Authenticator) tea.Cmd {
-	return func() tea.Msg {
-		hasValid := authenticator.HasValidToken()
-		return authCheckMsg{hasValidToken: hasValid}
+// Init starts device flow automatically if no valid token exists.
+func (m model) Init() tea.Cmd {
+	if m.authenticator != nil && !m.authenticator.HasValidToken() {
+		// Start device flow immediately when auth is required
+		return m.startAuthCmd()
 	}
+	return nil
 }
 
-func initiateDeviceFlow(authenticator *auth.Authenticator) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		deviceCode, err := authenticator.InitiateDeviceFlow(ctx)
-		return deviceCodeMsg{deviceCode: deviceCode, err: err}
-	}
-}
-
-func pollForToken(authenticator *auth.Authenticator, deviceCode string, interval int) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-
-		token, err := authenticator.PollForToken(ctx, deviceCode, interval)
-		return authCompleteMsg{token: token, err: err}
-	}
-}
-
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles messages and key events.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	// Handle authentication messages
-	case authCheckMsg, authInitiateMsg, deviceCodeMsg, authCompleteMsg:
-		return m.handleAuthMessages(msg)
-
-	case tea.KeyMsg:
-		return m.handleKeyMessages(msg)
-
 	case tea.WindowSizeMsg:
-		// Handle terminal resize
-		m.WindowWidth = msg.Width
-		m.WindowHeight = msg.Height
-		return m, nil
-	}
-	return m, nil
-}
-
-// handleAuthMessages processes authentication-related messages
-func (m Model) handleAuthMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case authCheckMsg:
-		if msg.hasValidToken {
-			m.AuthState = auth.AuthStateCompleted
-		} else {
-			m.AuthState = auth.AuthStateRequired
+		return m.handleResize(msg)
+	case tea.KeyMsg:
+		// When in list mode, handle Esc and selection differently
+		if m.mode == modeListSubscriptions {
+			return m.handleListKey(msg)
 		}
-		return m, nil
-
-	case authInitiateMsg:
-		m.AuthState = auth.AuthStateInProgress
-		return m, initiateDeviceFlow(m.Authenticator)
-
+		// In chat mode: Let textarea consume keys first so typing works
+		var cmd tea.Cmd
+		m.ta, cmd = m.ta.Update(msg)
+		// Then handle global keys and Enter submission
+		m2, cmd2 := m.handleKey(msg)
+		return m2, tea.Batch(cmd, cmd2)
 	case deviceCodeMsg:
+		return m.handleDeviceCode(msg)
+	case authSuccessMsg:
+		return m.handleAuthSuccess()
+	case authErrorMsg:
+		return m.handleAuthError(msg)
+	case subsLoadedMsg:
 		if msg.err != nil {
-			m.AuthState = auth.AuthStateFailed
-			m.AuthError = msg.err
+			logging.Error("Failed to load subscriptions", "error", msg.err.Error())
+			m.append("Failed to load subscriptions: " + msg.err.Error())
+			m.mode = modeChat
 			return m, nil
 		}
-		m.DeviceCode = msg.deviceCode
-		return m, pollForToken(m.Authenticator, msg.deviceCode.DeviceCode, msg.deviceCode.Interval)
-
-	case authCompleteMsg:
-		if msg.err != nil {
-			m.AuthState = auth.AuthStateFailed
-			m.AuthError = msg.err
+		logging.Debug("Received subsLoadedMsg", "itemCount", fmt.Sprintf("%d", len(msg.items)))
+		m.list.SetItems(msg.items)
+		if len(msg.items) == 0 {
+			m.append("No subscriptions found for this account.")
+			m.mode = modeChat
 			return m, nil
 		}
-
-		// Save token securely
-		if err := m.Authenticator.SaveTokenSecurely(msg.token); err != nil {
-			m.AuthState = auth.AuthStateFailed
-			m.AuthError = fmt.Errorf("failed to save token: %w", err)
-			return m, nil
-		}
-
-		m.AuthState = auth.AuthStateCompleted
-		m.DeviceCode = nil
-		m.AuthError = nil
+		logging.Debug("Set items to list", "listItemCount", fmt.Sprintf("%d", len(m.list.Items())))
+		// Stay in list mode and focus list
 		return m, nil
 	}
+	// Let child components update
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
+	// Track followTail based on whether user is at bottom before update
+	wasAtBottom := m.vp.AtBottom()
+	m.vp, _ = m.vp.Update(msg)
+	// If user scrolled up, stop following; if they reached bottom, resume
+	if wasAtBottom && m.vp.AtBottom() {
+		m.followTail = true
+	} else if !m.vp.AtBottom() {
+		m.followTail = false
+	}
+	return m, cmd
+}
+
+func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width, m.height = msg.Width, msg.Height
+	// Desired content width: cap at maxContentWidth; center horizontally via container padding
+	contentWidth := m.width
+	if m.maxContentWidth > 0 && contentWidth > m.maxContentWidth {
+		contentWidth = m.maxContentWidth
+	}
+	// Borders take 2 cols; textarea/view should subtract borders from inner widths
+	innerWidth := contentWidth - 2
+	if innerWidth < 10 {
+		innerWidth = 10
+	}
+	m.ta.SetWidth(innerWidth)
+	// Leave one line spacer between viewport and textarea
+	vpHeight := m.height - m.ta.Height() - 1 - 2 // -2 for viewport border
+	if vpHeight < 3 {
+		vpHeight = 3
+	}
+	m.vp.Width = innerWidth
+	m.vp.Height = vpHeight
+	// size list to same as viewport when active
+	m.list.SetSize(innerWidth, vpHeight)
+	if m.followTail || m.vp.AtBottom() {
+		m.vp.GotoBottom()
+		m.followTail = true
+	}
+
+	// Center container horizontally
+	sidePad := (m.width - (innerWidth + 2)) / 2 // +2 borders
+	if sidePad < 0 {
+		sidePad = 0
+	}
+	m.containerStyle = lipgloss.NewStyle().PaddingLeft(sidePad).PaddingRight(sidePad)
 	return m, nil
 }
 
-// handleKeyMessages processes keyboard input
-func (m Model) handleKeyMessages(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Check for global quit commands first
-	if msg.String() == "q" || msg.String() == quitKey {
+func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "esc":
+		m.quitting = true
 		return m, tea.Quit
-	}
-
-	// Handle command palette input first (highest priority when active)
-	if m.CommandPalette {
-		return m.handleCommandPaletteKeys(msg)
-	}
-
-	// Handle authentication state key inputs (only when not authenticated)
-	if m.AuthState != auth.AuthStateCompleted {
-		return m.handleAuthStateKeys(msg)
-	}
-
-	// Handle main application input (only when authenticated)
-	return m.handleMainAppKeys(msg)
-}
-
-// handleAuthStateKeys handles key input during authentication states
-func (m Model) handleAuthStateKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch m.AuthState {
-	case auth.AuthStateRequired:
-		// Any key starts authentication (quit is handled globally)
-		return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
-
-	case auth.AuthStateInProgress:
-		// Only quit allowed (handled globally), ignore other keys
-		return m, nil
-
-	case auth.AuthStateFailed:
-		switch msg.String() {
-		case "r":
-			// Retry authentication
-			m.AuthError = nil
-			return m, tea.Cmd(func() tea.Msg { return authInitiateMsg{} })
+	case "enter":
+		// Only submit when we're in single-line mode (InsertNewline disabled)
+		if m.ta.KeyMap.InsertNewline.Enabled() {
+			return m, nil
 		}
-		return m, nil
+		input := strings.TrimSpace(m.ta.Value())
+		m.ta.Reset()
+		if input == "" {
+			return m, nil
+		}
+		m.append("> " + input)
+		if m.authState != auth.AuthStateCompleted {
+			return m.handlePreAuthCommand(input)
+		}
+		return m.handlePostAuthCommand(input)
 	}
 	return m, nil
 }
 
-// handleCommandPaletteKeys handles key input when command palette is active
-func (m Model) handleCommandPaletteKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m model) handlePreAuthCommand(input string) (tea.Model, tea.Cmd) {
+	if input == "login" {
+		if m.authState != auth.AuthStateInProgress {
+			m.authState = auth.AuthStateInProgress
+			return m, m.startAuthCmd()
+		}
+		m.append("Login already in progress…")
+		return m, nil
+	}
+	m.append("Authentication required. Type 'login' to start device flow.")
+	return m, nil
+}
+
+func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
+	switch input {
+	case "help", "?":
+		m.append("Commands: help, subs, login, quit")
+	case "quit", "exit":
+		m.quitting = true
+		return m, tea.Quit
+	case "subs":
+		// Open subscriptions list panel and load items
+		m.mode = modeListSubscriptions
+		m.list.SetItems(nil)
+		m.append("Loading subscriptions…")
+		return m, m.loadSubscriptionsCmd()
+	default:
+		m.append("Unknown command. Type 'help'.")
+	}
+	return m, nil
+}
+
+// handleListKey processes keys while in subscriptions list mode
+func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		// Close command palette
-		m.CommandPalette = false
-		m.CommandInput = ""
+		m.mode = modeChat
+		m.append("Closed subscriptions panel.")
 		return m, nil
 	case "enter":
-		// Process command
-		m.CommandPalette = false
-		cmd := strings.TrimSpace(m.CommandInput)
-		m.CommandInput = ""
-
-		// Process the command
-		if cmd != "" {
-			(&m).processCommand(cmd)
-		}
-		return m, nil
-	case "backspace":
-		// Remove last character from command input
-		if len(m.CommandInput) > 0 {
-			m.CommandInput = m.CommandInput[:len(m.CommandInput)-1]
-		}
-		return m, nil
-	default:
-		// Add character to command input
-		if len(msg.String()) == 1 {
-			m.CommandInput += msg.String()
+		if sel, ok := m.list.SelectedItem().(subscriptionItem); ok {
+			if err := m.cfg.ValidateAndUpdateSetting(keyAzureSubscriptionID, sel.s.ID); err != nil {
+				m.append("Failed to set subscription: " + err.Error())
+			} else {
+				m.append("Subscription selected: " + sel.s.DisplayName + " (" + sel.s.ID + ")")
+			}
+			m.mode = modeChat
 		}
 		return m, nil
 	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
-// handleMainAppKeys handles key input for the main application
-func (m Model) handleMainAppKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+p":
-		// Only allow command palette when authenticated
-		if m.AuthState == auth.AuthStateCompleted {
-			m.CommandPalette = true
-			m.CommandInput = ""
-		}
-		return m, nil
-	case "esc":
-		// Close any open modals (currently just command palette)
-		if m.CommandPalette {
-			m.CommandPalette = false
-			m.CommandInput = ""
-		}
-		return m, nil
+func (m model) handleDeviceCode(msg deviceCodeMsg) (tea.Model, tea.Cmd) {
+	// store context and device response
+	m.deviceResp = msg.resp
+	m.authCtx = msg.ctx
+	m.cancelAuth = msg.cancel
+	m.authState = auth.AuthStateInProgress
+	// Show instructions
+	if m.deviceResp.VerificationURI != "" && m.deviceResp.UserCode != "" {
+		m.append("Open " + m.deviceResp.VerificationURI + " and enter code " + m.deviceResp.UserCode + ".")
 	}
+	if m.deviceResp.VerificationURIComplete != "" {
+		m.append("Or open: " + m.deviceResp.VerificationURIComplete)
+	}
+	m.append("Waiting for verification…")
+	return m, m.pollForTokenCmd()
+}
+
+func (m model) handleAuthSuccess() (tea.Model, tea.Cmd) {
+	if m.cancelAuth != nil {
+		m.cancelAuth()
+		m.cancelAuth = nil
+	}
+	m.authState = auth.AuthStateCompleted
+	m.append("Authentication successful. Token received and saved.")
 	return m, nil
 }
 
-// processCommand handles command execution from the command palette
-func (m *Model) processCommand(cmd string) {
-	// Clear previous feedback
-	m.FeedbackMessage = ""
-	m.FeedbackIsError = false
-
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return
+func (m model) handleAuthError(msg authErrorMsg) (tea.Model, tea.Cmd) {
+	if m.cancelAuth != nil {
+		m.cancelAuth()
+		m.cancelAuth = nil
 	}
-
-	switch parts[0] {
-	case "set":
-		m.handleSetCommand(parts[1:])
-	case "auth":
-		m.handleAuthCommand(parts[1:])
-	default:
-		m.FeedbackMessage = fmt.Sprintf("Unknown command: %s", parts[0])
-		m.FeedbackIsError = true
-	}
-}
-
-// handleAuthCommand processes authentication-related commands
-func (m *Model) handleAuthCommand(args []string) {
-	if len(args) == 0 {
-		// Show auth status
-		switch m.AuthState {
-		case auth.AuthStateCompleted:
-			m.FeedbackMessage = "✓ Authentication: Active and valid"
-		case auth.AuthStateRequired:
-			m.FeedbackMessage = "⚠ Authentication: Required"
-		case auth.AuthStateInProgress:
-			m.FeedbackMessage = "⏳ Authentication: In progress"
-		case auth.AuthStateFailed:
-			m.FeedbackMessage = "❌ Authentication: Failed"
-		default:
-			m.FeedbackMessage = "❓ Authentication: Unknown status"
-		}
-		return
-	}
-
-	switch args[0] {
-	case "logout", "clear":
-		if err := m.Authenticator.ClearToken(); err != nil {
-			m.FeedbackMessage = fmt.Sprintf("Failed to clear authentication: %v", err)
-			m.FeedbackIsError = true
-		} else {
-			m.AuthState = auth.AuthStateRequired
-			m.FeedbackMessage = "✓ Authentication cleared. You will need to re-authenticate."
-		}
-	case "refresh":
-		// This would normally be handled automatically, but allow manual refresh
-		m.FeedbackMessage = "Token refresh is handled automatically when needed"
-	default:
-		m.FeedbackMessage = fmt.Sprintf("Unknown auth command: %s. Available: logout, clear, refresh", args[0])
-		m.FeedbackIsError = true
-	}
-}
-
-// handleSetCommand processes the "set" command
-func (m *Model) handleSetCommand(args []string) {
-	if len(args) == 0 {
-		// List all settings
-		settings := m.Config.ListAllSettings()
-		var settingsList []string
-		for name, value := range settings {
-			settingsList = append(settingsList, fmt.Sprintf("%s=%s", name, value))
-		}
-		m.FeedbackMessage = fmt.Sprintf("Current settings: %s", strings.Join(settingsList, ", "))
-		return
-	}
-
-	// Parse setting=value format
-	arg := strings.Join(args, " ")
-	parts := strings.SplitN(arg, "=", 2)
-	if len(parts) != 2 {
-		m.FeedbackMessage = "Usage: set <setting>=<value> or just 'set' to list all settings"
-		m.FeedbackIsError = true
-		return
-	}
-
-	setting := strings.TrimSpace(parts[0])
-	value := strings.TrimSpace(parts[1])
-
-	if err := m.Config.ValidateAndUpdateSetting(setting, value); err != nil {
-		m.FeedbackMessage = err.Error()
-		m.FeedbackIsError = true
-		return
-	}
-
-	// Success feedback
-	m.FeedbackMessage = fmt.Sprintf("✓ %s set to: %s", setting, value)
-
-	// Update help text if LogFetchSize changed
-	if setting == "fetchSize" {
-		m.HelpText = fmt.Sprintf("Press q to quit, Ctrl+P for command palette. Log fetch size: %d", m.Config.LogFetchSize)
-	}
+	m.authState = auth.AuthStateFailed
+	m.append("Authentication failed: " + msg.err.Error())
+	m.append("Tips: verify Tenant and Client ID, network access, and permissions in Azure Portal: https://portal.azure.com")
+	m.append("Type 'login' to try again or 'help'.")
+	return m, nil
 }

@@ -1,121 +1,45 @@
-# Copilot Instructions for bc-insights-tui
+## Copilot instructions (concise, repo-specific)
 
-## Development Workflow & Standards (CRITICAL)
+Current state
+- Chat-first rewrite in progress (Step 0): `main.go` runs, TUI is being rebuilt. Core packages (`config/`, `auth/`, `appinsights/`, `logging/`) are active; many `tui/` files are placeholders. Read `docs/chat-first-ui-rewrite.md` before UI work.
 
-### Todos
-It is critical you always use the todos tool to plan and track your work, even if there is only 1 or 2 tasks. This ensures nothing is overlooked and helps maintain focus on priorities.
+Do-first for agents
+- Always plan with the Todos tool; track each step separately.
+- Clean build gate: run `make all` (lint → race tests → build). Zero warnings, all tests green.
+- Research first: use Context7 + Perplexity + official Bubble Tea/Bubbles docs (and search charm repos) before changing linters, OAuth, or Bubble Tea patterns.
+- **CRITICAL: AI agents CANNOT run interactive TUI mode** - the app will hang waiting for keyboard input. Only use `./bc-insights-tui.exe -run=COMMAND` for testing. If interactive TUI testing is needed, ask the user to test it manually.
 
-### ⚠️ MANDATORY: Clean Build & Linting
-**BEFORE ANY CODE SUBMISSION OR RESPONSE**, you MUST run the complete linting suite and ensure a clean build:
-```bash
-make all
-```
-This command runs the full pipeline: lint, race tests, and build.
+Architecture (big picture)
+- Go + Charm ecosystem. Entry: `main.go` → init `logging` → load `config` → (future) start chat-first UI.
+- Dynamic telemetry: never hard-code Business Central log schemas. `eventId` defines `customDimensions` keys; table columns must follow KQL `project` results.
+- Packages:
+  - `config/`: precedence = defaults → JSON file (`config.json` or user home) → env (BCINSIGHTS_*) → flags. Provides `ValidateAndUpdateSetting`, `ListAllSettings` for `set/get` commands.
+  - `auth/`: Azure OAuth2 Device Flow. Key APIs: `InitiateDeviceFlow`, `PollForToken`, `SaveTokenSecurely` (go-keyring), `GetValidToken`/`RefreshTokenIfNeeded`.
+  - `appinsights/`: `ExecuteQuery(ctx, kql)` posts to `https://api.applicationinsights.io/v1/apps/{appId}/query`; returns tables with dynamic `Columns` and `Rows`. `ValidateQuery` does lightweight checks.
+  - `logging/`: logs to `logs/bc-insights-tui-YYYY-MM-DD.log`. Set `BC_INSIGHTS_LOG_LEVEL=DEBUG` to mirror to stdout.
 
-**CRITICAL REQUIREMENTS:**
-- ✅ **`make all` MUST complete without ANY errors or warnings**
-- ✅ All linting must pass with ZERO warnings or errors
-- ✅ Code must build successfully with `go build`
-- ✅ All tests must pass with `go test -race ./...`
+Workflows that matter
+- Build/test/lint: `make build`, `make test`, `make race`, `make lint`, `make all` (CI-equivalent). UI-specific targets: `make ui-test` (when UI exists).
+- Run (Windows): `./bc-insights-tui.exe`. It currently prints a Step 0 placeholder.
+- **Non-interactive mode: `./bc-insights-tui.exe -run=COMMAND` for testing/automation without TUI. Commands: `subs` (list subscriptions), `login` (device flow auth). MANDATORY for AI agents - never run interactive mode as it hangs waiting for keyboard input.**
+- Config examples (env): `LOG_FETCH_SIZE`, `BCINSIGHTS_ENVIRONMENT`, `BCINSIGHTS_APP_INSIGHTS_ID`, OAuth: `BCINSIGHTS_OAUTH2_TENANT_ID`, `BCINSIGHTS_OAUTH2_CLIENT_ID`, `BCINSIGHTS_OAUTH2_SCOPES`.
 
-**Linting Configuration**: `.golangci.yml` includes strict rules with exceptions for TUI patterns (disabled `fieldalignment` for TUI models, allows embedding in TUI components).
+UI conventions (chat-first)
+- Replace modal overlays/command palette with: top viewport (scrollback) + bottom textarea (chat). No layered modals; switch focus between components; Esc returns to chat. See `docs/chat-first-ui-rewrite.md` for layout, keys, and steps.
+- When reintroducing `tui/`, keep Bubble Tea MVC files: `model.go`, `update.go`, `view.go`. Compose bubbles; avoid global state.
 
-**Environment Setup**: `.github/workflows/copilot-setup-steps.yml` configures the Copilot coding agent environment with golangci-lint and Go dependencies pre-installed.
+Project-specific rules
+- Errors must be actionable (include likely cause and next step, e.g., Azure portal link).
+- Online-only; no local caching. Low memory: summarize large results; open interactive tables on demand.
+- KQL-driven columns: parse API result columns; don’t rely on static structs.
 
-### ⚠️ MANDATORY: Documentation Research
-**BEFORE implementing any feature or fixing configuration issues**, you MUST use Context7 MCP to get up-to-date documentation:
-```
-1. Use mcp_context7_resolve-library-id to find the correct library
-2. Use mcp_context7_get-library-docs to get current documentation
-3. Verify configuration/implementation against latest docs
-```
+Integration quick path (example)
+1) Acquire token: `auth.NewAuthenticator(cfg.OAuth2)` → device flow → `SaveTokenSecurely`.
+2) Query: `appinsights.NewClient(token, cfg.ApplicationInsightsID).ExecuteQuery(ctx, kql)`.
+3) Render: build table columns from `QueryResponse.Tables[0].Columns`.
 
-**Examples:**
-- Before changing `.golangci.yml` → Search for `golangci-lint` documentation
-- Before implementing OAuth2 → Search for `azure` or `oauth2` documentation
-- Before using Bubble Tea patterns → Search for `bubbletea` or `charm` documentation
+Key files to read first
+- `docs/chat-first-ui-rewrite.md`, `makefile`, `config/config.go`, `auth/authenticator.go`, `appinsights/client.go`, `main.go`.
 
-### Phase-Based Development
-1. ✅ **Phase 1**: Basic TUI skeleton and configuration (COMPLETE)
-2. 🚧 **Phase 2**: Azure OAuth2 authentication with device flow (auth/authenticator.go placeholder)
-3. 🚧 **Phase 3**: Application Insights integration (appinsights/client.go placeholder)
-4. 🚧 **Phase 4**: Advanced features (KQL editor, saved queries, dynamic columns)
-5. 🚧 **Phase 5**: AI-powered KQL generation (ai/assistant.go placeholder)
-
-## Project Overview
-
-This is a Go-based Terminal User Interface for Azure Application Insights, specifically designed for Business Central developers. The project uses the Charm Bracelet ecosystem (Bubble Tea, Lip Gloss, Bubbles) for TUI components.
-
-**Current State**: Phase 1 complete (basic TUI skeleton). The project has a working Bubble Tea foundation with configuration loading, but auth, API client, and AI integration are placeholder files.
-
-## Architecture Principles
-
-### 1. Dynamic Data Model (CRITICAL)
-Business Central telemetry structure is determined by the `eventId` field, which defines the schema of `customDimensions`. **Never use static data models for log entries**. Always design components to dynamically parse and display key-value pairs based on the `eventId`.
-
-### 2. Command Palette Pattern
-The UI is built around a keyboard-driven command palette (Ctrl+P) rather than traditional menus. All user actions flow through commands:
-- `ai: <natural language query>` - AI-powered KQL generation
-- `filter: <text>` - Quick text filtering
-- `set <setting>=<value>` - Configuration changes
-
-### 3. Bubble Tea MVC Pattern
-Follow the established three-file pattern in `tui/`:
-- `model.go` - State and data structures
-- `update.go` - Event handling and state transitions
-- `view.go` - Rendering logic
-
-Current `Model` struct includes `Config` field for accessing settings.
-
-## Package Structure & Responsibilities
-
-```
-main.go              # Entry point: config loading → TUI initialization
-tui/                 # Bubble Tea UI components (model.go, update.go, view.go)
-auth/                # OAuth2 Device Authorization Flow (placeholder)
-appinsights/         # Application Insights API client (placeholder)
-ai/                  # AI service integration for KQL generation (placeholder)
-config/              # Environment-based configuration
-```
-
-**Configuration Pattern**: Environment variables with fallback defaults (see `config.LoadConfig()`). Example: `LOG_FETCH_SIZE` env var with default of 50.
-
-## Business Central Telemetry Context
-
-- **Primary data source**: `traces` table in Application Insights
-- **Critical field**: `customDimensions` contains the most valuable log context
-- **Schema definition**: `eventId` determines the structure of `customDimensions`
-- **Dynamic nature**: Event schemas change with BC releases and custom partner events
-
-Example event structure:
-```json
-{
-  "eventId": "RT0019",
-  "customDimensions": {
-    "alHttpStatus": "404",
-    "alUrl": "https://api.example.com/data"
-  }
-}
-```
-
-## Implementation Requirements
-
-### Error Handling
-All authentication and API errors must be user-friendly with actionable guidance:
-- ❌ "Authentication failed"
-- ✅ "Authentication failed. Check Azure permissions and verify your credentials at https://portal.azure.com"
-
-### UI Constraints
-- **Target Platform**: Windows (primary)
-- **Online-Only**: No offline mode, no local log caching
-- **Memory**: Low memory footprint requirement
-- **Dynamic Columns**: KQL `project` statements must dynamically adjust table columns
-
-### Key UI Patterns (from TUI mockup)
-- Device auth flow with clear instructions and spinner
-- Main log table with navigation (↑↓ keys, Enter for details)
-- Modal overlay for log details (preserves background context)
-- Command palette input with real-time feedback
-- Settings changes via `set` commands with confirmation
-
-When implementing new features, prioritize the command palette workflow and ensure dynamic handling of Business Central's flexible telemetry schema.
+Acceptance before PR
+- `make all` passes cleanly; style/lint zero warnings; tests (incl. race) pass. Update or add focused tests when changing public behavior.
