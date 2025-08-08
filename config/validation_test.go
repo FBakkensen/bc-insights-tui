@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+// setupTestModeForValidation sets the TEST_MODE environment variable for test isolation
+func setupTestModeForValidation(t *testing.T) {
+	t.Helper()
+	t.Setenv("TEST_MODE", "1")
+}
+
 // equalStringSlices compares two string slices for equality
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
@@ -21,6 +27,8 @@ func equalStringSlices(a, b []string) bool {
 // Test all validation rules comprehensively
 
 func TestValidateAndUpdateSetting_FetchSize(t *testing.T) {
+	setupTestModeForValidation(t)
+
 	cfg := NewConfig()
 	cfg.LogFetchSize = 0 // Reset to zero for testing validation logic
 
@@ -119,7 +127,8 @@ func TestValidateAndUpdateSetting_Environment(t *testing.T) {
 			cfg = NewConfig()
 			cfg.LogFetchSize = 0
 
-			err := cfg.ValidateAndUpdateSetting("environment", tc.value)
+			// Test validation logic directly without file saving
+			err := cfg.validateBasicSetting("environment", tc.value)
 
 			if tc.shouldError {
 				if err == nil {
@@ -289,6 +298,8 @@ func TestValidateAndUpdateSetting_UnknownSetting(t *testing.T) {
 }
 
 func TestGetSettingValue_AllSettings(t *testing.T) {
+	setupTestModeForValidation(t)
+
 	cfg := NewConfig()
 	cfg.LogFetchSize = 123
 	cfg.Environment = "TestValue"

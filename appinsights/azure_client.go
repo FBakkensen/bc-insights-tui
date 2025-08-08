@@ -186,6 +186,19 @@ func (ac *AzureClient) ListApplicationInsightsResources(ctx context.Context) ([]
 	return allResources, nil
 }
 
+// ListApplicationInsightsResourcesForSubscription lists Application Insights resources for a specific subscription
+func (ac *AzureClient) ListApplicationInsightsResourcesForSubscription(ctx context.Context, subscriptionID string) ([]ApplicationInsightsResource, error) {
+	if ac.credential == nil {
+		return nil, fmt.Errorf("no Azure credential available")
+	}
+
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("subscription ID is required")
+	}
+
+	return ac.listResourcesInSubscription(ctx, subscriptionID)
+}
+
 // getAccessibleSubscriptions gets all subscription IDs accessible to the user
 func (ac *AzureClient) getAccessibleSubscriptions(ctx context.Context) ([]string, error) {
 	// This is a simplified implementation that would need to be expanded

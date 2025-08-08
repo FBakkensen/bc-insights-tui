@@ -11,9 +11,17 @@ const (
 	testEnvKeyPrecedence = "env-key"
 )
 
+// setupTestModeForPrecedence sets the TEST_MODE environment variable for test isolation
+func setupTestModeForPrecedence(t *testing.T) {
+	t.Helper()
+	t.Setenv("TEST_MODE", "1")
+}
+
 // Test priority order between config sources: flags > env > file > defaults
 
 func TestPrecedence_DefaultsOnly(t *testing.T) {
+	setupTestModeForPrecedence(t)
+
 	// Test that defaults are used when no other sources are available
 
 	// Ensure clean environment
@@ -43,6 +51,8 @@ func TestPrecedence_DefaultsOnly(t *testing.T) {
 }
 
 func TestPrecedence_FileOverridesDefaults(t *testing.T) {
+	setupTestModeForPrecedence(t)
+
 	// Test that config file values override defaults
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "precedence-file.json")
@@ -114,7 +124,9 @@ func TestPrecedence_EnvOverridesFileAndDefaults(t *testing.T) {
 }
 
 func TestPrecedence_FlagsOverrideAll(t *testing.T) {
-	// Test that command line flags override env, file, and defaults
+	setupTestModeForPrecedence(t)
+
+	// Test that command line flags have highest priority
 	tempDir := t.TempDir()
 	configFile := filepath.Join(tempDir, "precedence-flags.json")
 
@@ -244,9 +256,9 @@ func TestPrecedence_InvalidEnvVarsFallback(t *testing.T) {
 }
 
 func TestPrecedence_ZeroValueFlags(t *testing.T) {
-	// Test behavior with zero-value flags
-	tempDir := t.TempDir()
-	configFile := filepath.Join(tempDir, "precedence-zero.json")
+	// Test behavior with zero-value flags using dependency injection
+	fs := NewMemFileSystem()
+	configFile := "/test/precedence-zero.json"
 
 	// Create config file
 	fileConfig := Config{
@@ -255,7 +267,10 @@ func TestPrecedence_ZeroValueFlags(t *testing.T) {
 		ApplicationInsightsKey: "file-key",
 	}
 	jsonData, _ := json.Marshal(fileConfig)
-	os.WriteFile(configFile, jsonData, 0o644)
+	err := fs.WriteFile(configFile, jsonData, 0o644)
+	if err != nil {
+		t.Fatalf("Failed to create config file: %v", err)
+	}
 
 	// Set environment variables
 	os.Setenv("LOG_FETCH_SIZE", "222")
@@ -267,13 +282,24 @@ func TestPrecedence_ZeroValueFlags(t *testing.T) {
 		os.Unsetenv("BCINSIGHTS_APP_INSIGHTS_KEY")
 	}()
 
-	// Load with zero-value flags (should not override)
-	cfg := LoadConfigWithArgs([]string{
-		"--config=" + configFile,
-		"--fetch-size=0", // Zero value, should not override
-		"--environment=", // Empty string, should override
-		// --app-insights-key not specified
+	// Create test loader with config file
+	loader := NewTestConfigLoader(fs, []string{configFile})
+
+	// Configure mock flag parser with zero-value flags
+	mockFlagParser := &MockFlagParser{}
+	zeroVal := 0
+	emptyVal := ""
+	mockFlagParser.SetFlags(&ParsedFlags{
+		configFile:            &configFile,
+		environment:           &emptyVal, // Empty string, should override
+		fetchSize:             &zeroVal,  // Zero value, should not override
+		applicationInsights:   nil,       // Not specified
+		applicationInsightsID: nil,       // Not specified
 	})
+	loader.flagParser = mockFlagParser
+
+	// Load with zero-value flags
+	cfg := loader.LoadWithArgs([]string{})
 
 	// Expected result:
 	// - LogFetchSize: zero flag should not override, so env (222) wins

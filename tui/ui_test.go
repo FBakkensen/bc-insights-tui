@@ -28,11 +28,11 @@ func newTestModel() model {
 	vp := viewport.New(80, 10)
 	vp.SetContent("")
 
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Select Azure Subscription"
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(true)
-	l.SetShowHelp(false)
+	list := list.New([]list.Item{}, list.NewDefaultDelegate(), 80, 20)
+	list.Title = titleSelectSubscription
+	list.SetShowStatusBar(false)
+	list.SetFilteringEnabled(true)
+	list.SetShowHelp(false)
 
 	// Create a properly initialized config
 	cfg := config.NewConfig()
@@ -44,7 +44,7 @@ func newTestModel() model {
 	m := model{
 		vp:              vp,
 		ta:              ta,
-		list:            l,
+		list:            list,
 		cfg:             cfg,
 		authenticator:   nil, // do not call real auth in unit tests
 		authState:       auth.AuthStateUnknown,
@@ -110,7 +110,7 @@ func TestUI_PostAuth_HelpAndQuit(t *testing.T) {
 	m.ta.SetValue("help")
 	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := m2Any.(model)
-	if !strings.Contains(m2.content, "Commands: help, subs, login, quit") {
+	if !strings.Contains(m2.content, "Commands: help, subs, resources, config, login, quit") {
 		t.Fatalf("expected help text in content; got: %q", m2.content)
 	}
 
@@ -510,5 +510,26 @@ func TestSubscriptionItem_VariousStates(t *testing.T) {
 				t.Errorf("FilterValue() = %q, want %q", got, tt.wantFilter)
 			}
 		})
+	}
+}
+
+func TestUI_ConfigCommand(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+
+	// config command
+	m.ta.SetValue("config")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+
+	// Verify config output appears in content
+	if !strings.Contains(m2.content, "Current Configuration:") {
+		t.Fatalf("expected config output header in content; got: %q", m2.content)
+	}
+	if !strings.Contains(m2.content, "Basic Settings:") {
+		t.Fatalf("expected basic settings section in content; got: %q", m2.content)
+	}
+	if !strings.Contains(m2.content, "OAuth2:") {
+		t.Fatalf("expected OAuth2 section in content; got: %q", m2.content)
 	}
 }
