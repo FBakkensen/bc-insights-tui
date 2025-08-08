@@ -184,7 +184,7 @@ func (m model) handlePreAuthCommand(input string) (tea.Model, tea.Cmd) {
 func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	switch input {
 	case "help", "?":
-		m.append("Commands: help, subs, resources, config, login, quit")
+		m.append("Commands: help, subs, resources, config, config get <key>, config set <key>=<value>, login, quit")
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
@@ -207,8 +207,70 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 		m.showConfig()
 		return m, nil
 	default:
+		// Handle extended config commands
+		if strings.HasPrefix(input, "config ") {
+			sub := strings.TrimSpace(strings.TrimPrefix(input, "config "))
+			return m.handleConfigSubcommand(sub)
+		}
 		m.append("Unknown command. Type 'help'.")
 	}
+	return m, nil
+}
+
+// handleConfigSubcommand parses and executes `config get` and `config set` operations
+func (m model) handleConfigSubcommand(sub string) (tea.Model, tea.Cmd) {
+	// Patterns:
+	// - get <key>
+	// - set <key>=<value>
+	lower := strings.ToLower(sub)
+	if strings.HasPrefix(lower, "get ") {
+		key := strings.TrimSpace(sub[4:])
+		if key == "" {
+			m.append("Usage: config get <key>")
+			return m, nil
+		}
+		val, err := m.cfg.GetSettingValue(key)
+		if err != nil {
+			m.append("Unknown setting: " + key)
+			m.append("Tip: type 'config' to see available settings.")
+			return m, nil
+		}
+		m.append(key + " = " + val)
+		return m, nil
+	}
+
+	if strings.HasPrefix(lower, "set ") {
+		rest := strings.TrimSpace(sub[4:])
+		if rest == "" {
+			m.append("Usage: config set <key>=<value>")
+			return m, nil
+		}
+		// Split on first '=' only to allow spaces in value
+		parts := strings.SplitN(rest, "=", 2)
+		if len(parts) != 2 {
+			m.append("Usage: config set <key>=<value>")
+			return m, nil
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Capture old value (masked where applicable)
+		oldVal, _ := m.cfg.GetSettingValue(key)
+
+		if err := m.cfg.ValidateAndUpdateSetting(key, value); err != nil {
+			m.append("Failed to update setting: " + err.Error())
+			m.append("Tip: type 'config' to see available settings or 'config get " + key + "'.")
+			return m, nil
+		}
+
+		// Get masked new value for display/logging
+		newVal, _ := m.cfg.GetSettingValue(key)
+		m.append("Updated " + key + " (old: " + oldVal + ", new: " + newVal + ").")
+		logging.Info("Config updated", "key", key, "old", oldVal, "new", newVal)
+		return m, nil
+	}
+
+	m.append("Unknown config command. Usage: config | config get <key> | config set <key>=<value>")
 	return m, nil
 }
 

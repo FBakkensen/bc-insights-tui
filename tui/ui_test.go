@@ -110,8 +110,9 @@ func TestUI_PostAuth_HelpAndQuit(t *testing.T) {
 	m.ta.SetValue("help")
 	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := m2Any.(model)
-	if !strings.Contains(m2.content, "Commands: help, subs, resources, config, login, quit") {
-		t.Fatalf("expected help text in content; got: %q", m2.content)
+	// Help text should include a Commands header and mention config operations
+	if !strings.Contains(m2.content, "Commands:") || !strings.Contains(m2.content, "config get") || !strings.Contains(m2.content, "config set") {
+		t.Fatalf("expected help text listing config get/set; got: %q", m2.content)
 	}
 
 	// quit command
@@ -531,5 +532,59 @@ func TestUI_ConfigCommand(t *testing.T) {
 	}
 	if !strings.Contains(m2.content, "OAuth2:") {
 		t.Fatalf("expected OAuth2 section in content; got: %q", m2.content)
+	}
+}
+
+func TestUI_ConfigGetAndSet_Workflow(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+
+	// Get an existing setting
+	m.ta.SetValue("config get fetchSize")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	if !strings.Contains(m2.content, "fetchSize = ") {
+		t.Fatalf("expected fetchSize value printed; got: %q", m2.content)
+	}
+
+	// Set a valid integer value
+	m2.ta.SetValue("config set fetchSize=123")
+	m3Any, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m3 := m3Any.(model)
+	if !strings.Contains(m3.content, "Updated fetchSize") {
+		t.Fatalf("expected update confirmation for fetchSize; got: %q", m3.content)
+	}
+
+	// Verify the new value through get
+	m3.ta.SetValue("config get fetchSize")
+	m4Any, _ := m3.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m4 := m4Any.(model)
+	if !strings.Contains(m4.content, "fetchSize = 123") {
+		t.Fatalf("expected fetchSize = 123; got: %q", m4.content)
+	}
+}
+
+func TestUI_ConfigSet_ValidationError(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+
+	// Invalid: queryTimeoutSeconds must be positive integer
+	m.ta.SetValue("config set queryTimeoutSeconds=0")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	if !strings.Contains(m2.content, "Failed to update setting:") {
+		t.Fatalf("expected validation failure message; got: %q", m2.content)
+	}
+}
+
+func TestUI_ConfigSet_UnknownKey(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+
+	m.ta.SetValue("config set notAKey=1")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	if !strings.Contains(m2.content, "Unknown setting") && !strings.Contains(m2.content, "Failed to update setting:") {
+		t.Fatalf("expected unknown setting or failure message; got: %q", m2.content)
 	}
 }
