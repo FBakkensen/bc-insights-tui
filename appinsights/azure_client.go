@@ -195,7 +195,7 @@ func (ac *AzureClient) ListApplicationInsightsResourcesForSubscription(ctx conte
 	if subscriptionID == "" {
 		return nil, fmt.Errorf("subscription ID is required")
 	}
-
+	logging.Debug("Listing AI resources for subscription", "subscriptionId", subscriptionID)
 	return ac.listResourcesInSubscription(ctx, subscriptionID)
 }
 
@@ -240,23 +240,32 @@ func getEnvValue(key string) string {
 // listResourcesInSubscription lists Application Insights resources in a specific subscription
 func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscriptionID string) ([]ApplicationInsightsResource, error) {
 	// Create Application Insights client for this subscription
+	logging.Debug("Creating AI client factory", "subscriptionId", subscriptionID)
 	clientFactory, err := armapplicationinsights.NewClientFactory(subscriptionID, ac.credential, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Application Insights client factory: %w", err)
+		logging.Error("Failed to create AI client factory", "subscriptionId", subscriptionID, "error", err.Error())
+		// Add actionable guidance with likely causes and next steps
+		return nil, fmt.Errorf("failed to create Application Insights client factory: %w. Likely causes: (1) invalid or missing Azure credential (token expired or wrong scopes), (2) incorrect subscription ID, (3) network or proxy restrictions blocking https://management.azure.com. Next steps: re-run 'login', ensure scope includes https://management.azure.com/.default, verify AZURE_SUBSCRIPTION_ID, and check network/proxy settings. See docs: https://learn.microsoft.com/azure/azure-resource-manager/management/managed-identity-apis-use and SDK auth: https://learn.microsoft.com/azure/developer/go/azure-sdk-authentication", err)
 	}
 
 	componentsClient := clientFactory.NewComponentsClient()
 
 	// List all Application Insights components in the subscription
+	logging.Debug("Starting AI components pager", "subscriptionId", subscriptionID)
 	pager := componentsClient.NewListPager(nil)
 	var resources []ApplicationInsightsResource
 
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to list Application Insights components: %w", err)
+			logging.Error("Failed to list AI components page", "subscriptionId", subscriptionID, "error", err.Error())
+			return nil, fmt.Errorf(
+				"failed to list Application Insights components: %w. Likely causes: insufficient RBAC on subscription '%s' or network/proxy blocking ARM. Next steps: verify access in Azure Portal Subscriptions (https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBlade), ensure a role like 'Monitoring Reader', and check corporate proxy settings",
+				err, subscriptionID,
+			)
 		}
 
+		logging.Debug("Received AI components page", "subscriptionId", subscriptionID, "count", fmt.Sprintf("%d", len(page.Value)))
 		for _, component := range page.Value {
 			if component == nil {
 				continue
@@ -267,6 +276,7 @@ func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscrip
 		}
 	}
 
+	logging.Info("Completed AI components listing", "subscriptionId", subscriptionID, "total", fmt.Sprintf("%d", len(resources)))
 	return resources, nil
 }
 
@@ -313,7 +323,8 @@ func (ac *AzureClient) convertComponentToResource(component *armapplicationinsig
 func (ac *AzureClient) GetResourceDetails(ctx context.Context, subscriptionID, resourceGroupName, componentName string) (*ApplicationInsightsResource, error) {
 	clientFactory, err := armapplicationinsights.NewClientFactory(subscriptionID, ac.credential, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Application Insights client factory: %w", err)
+		// Provide actionable context to help resolve
+		return nil, fmt.Errorf("failed to create Application Insights client factory: %w. This typically indicates an auth or configuration issue. Verify that your token grants access to Azure Resource Manager (scope https://management.azure.com/.default), and that the subscription ID '%s' is correct and accessible. If behind a corporate proxy, configure proxy environment variables. Docs: ARM overview https://learn.microsoft.com/azure/azure-resource-manager/management/overview and Go SDK auth https://learn.microsoft.com/azure/developer/go/azure-sdk-authentication", err, subscriptionID)
 	}
 
 	componentsClient := clientFactory.NewComponentsClient()

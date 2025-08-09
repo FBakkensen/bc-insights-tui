@@ -94,6 +94,29 @@ make all     # Run lint, race, and build (default)
 
 **For AI Coding Agents**: Use these standardized commands for consistent build/test/lint operations across different development environments.
 
+### Automation compliance (AI agents)
+
+AI agents must not run the interactive TUI. To comply with organizational automation standards and to avoid hanging on interactive input, always use the non-interactive runner with -run=COMMAND.
+
+Example (non-interactive invocations):
+
+```bash
+# Authenticate using device flow without launching the TUI
+./bc-insights-tui.exe -run=login
+
+# List subscriptions (prints to stdout); do NOT start interactive UI
+./bc-insights-tui.exe -run=subs
+
+# After selecting and saving config via non-interactive commands, you can run other commands similarly
+# e.g., future: ./bc-insights-tui.exe -run=kql:"traces | take 5"
+
+# Tail latest logs without touching stdout mirroring (useful for debugging)
+./bc-insights-tui.exe -run=logs        # last 200 lines
+./bc-insights-tui.exe -run=logs:500    # last 500 lines
+```
+
+Never invoke ./bc-insights-tui (without -run) from automation or AI tooling.
+
 ### Configuration
 
 The application uses environment variables with fallback defaults:
@@ -125,6 +148,29 @@ Press `Ctrl+P` to open the command palette and use these commands:
 - `Esc` - Close modals/return to main view
 - `Ctrl+Q` - Exit application
 - `Ctrl+C` - Force exit application
+
+### Single-line KQL (Step 5)
+
+You can run Application Insights Kusto queries directly from the chat input:
+
+- Type: `kql: <your KQL>` and press Enter.
+- The top panel shows a snapshot table with up to your configured fetch size and a summary line.
+- Press Enter on an empty input to open the results in an interactive table (use arrow keys to navigate, Esc to return).
+
+Requirements:
+- Be authenticated (`login`).
+- Set an Application Insights App ID (`config set applicationInsightsAppId=<id>` or pick from resources).
+
+Errors are mapped to actionable hints (401/403/400/429, timeouts) and logs include a query hash, not the full text.
+
+### Debug logs
+
+To enable detailed debug logging while writing to a daily file under `logs/`:
+
+- Set environment variable `BC_INSIGHTS_LOG_LEVEL=DEBUG` before starting the app.
+- Logs are written to `logs/bc-insights-tui-YYYY-MM-DD.log`.
+- Logs are not printed to stdout by default. To mirror logs to stdout, explicitly set `BC_INSIGHTS_LOG_TO_STDOUT=true` (opt-in).
+- KQL execution logs preflight, request timing, HTTP status codes, and response metadata (request IDs). Secrets and the full query text are not logged.
 
 ## 🔍 Business Central Telemetry Context
 

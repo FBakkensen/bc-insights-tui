@@ -2,21 +2,28 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
+
+const keyEsc = "esc"
 
 // Init starts device flow automatically if no valid token exists.
 func (m model) Init() tea.Cmd {
 	if m.authenticator != nil && !m.authenticator.HasValidToken() {
 		// Start device flow immediately when auth is required
+		logging.Debug("No valid token at Init; starting device flow")
 		return m.startAuthCmd()
 	}
+	logging.Debug("Init complete; token present or authenticator nil")
 	return nil
 }
 
@@ -37,6 +44,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleSubsLoaded(msg)
 	case insightsLoadedMsg:
 		return m.handleInsightsLoaded(msg)
+	case kqlResultMsg:
+		return m.handleKQLResult(msg)
 	}
 	// Let child components update
 	return m.handleComponentUpdate(msg)
@@ -46,6 +55,21 @@ func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// When in list mode, handle Esc and selection differently
 	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
 		return m.handleListKey(msg)
+	}
+	// When in table mode, handle Esc to return to chat; delegate nav to table
+	if m.mode == modeTableResults {
+		switch msg.String() {
+		case keyEsc:
+			m.mode = modeChat
+			m.append("Closed results table.")
+			if m.followTail || m.vp.AtBottom() {
+				m.vp.GotoBottom()
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.tbl, cmd = m.tbl.Update(msg)
+		return m, cmd
 	}
 	// In chat mode: Let textarea consume keys first so typing works
 	var cmd tea.Cmd
@@ -130,6 +154,9 @@ func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.vp.Height = vpHeight
 	// size list to same as viewport when active
 	m.list.SetSize(innerWidth, vpHeight)
+	// size table similarly
+	m.tbl.SetWidth(innerWidth)
+	m.tbl.SetHeight(vpHeight)
 	if m.followTail || m.vp.AtBottom() {
 		m.vp.GotoBottom()
 		m.followTail = true
@@ -157,6 +184,13 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		input := strings.TrimSpace(m.ta.Value())
 		m.ta.Reset()
 		if input == "" {
+			// If we have results, open interactive table on empty Enter
+			if m.haveResults {
+				// Build table model and switch mode
+				m.initInteractiveTable()
+				m.mode = modeTableResults
+				return m, nil
+			}
 			return m, nil
 		}
 		m.append("> " + input)
@@ -182,13 +216,20 @@ func (m model) handlePreAuthCommand(input string) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
+	logging.Debug("handlePostAuthCommand", "input_prefix", func() string {
+		if len(input) > 16 {
+			return input[:16]
+		}
+		return input
+	}())
 	switch input {
 	case "help", "?":
-		m.append("Commands: help, subs, resources, config, config get <key>, config set <key>=<value>, login, quit")
+		m.append("Commands: help, subs, resources, config, config get <key>, config set <key>=<value>, kql: <query>, login, quit")
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
 	case "subs":
+		logging.Debug("Entering list subscriptions mode")
 		// Open subscriptions list panel and load items
 		m.mode = modeListSubscriptions
 		m.list.SetItems(nil)
@@ -196,6 +237,7 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 		m.append("Loading subscriptions…")
 		return m, m.loadSubscriptionsCmd()
 	case "resources":
+		logging.Debug("Entering list insights resources mode")
 		// Open Application Insights resources list panel and load items
 		m.mode = modeListInsightsResources
 		m.list.SetItems(nil)
@@ -207,6 +249,20 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 		m.showConfig()
 		return m, nil
 	default:
+		// Step 5: single-line KQL prefix
+		lower := strings.ToLower(input)
+		if strings.HasPrefix(lower, "kql:") {
+			logging.Debug("Detected KQL command")
+			q := strings.TrimSpace(input[len("kql:"):])
+			if q == "" {
+				m.append("Query cannot be empty.")
+				return m, nil
+			}
+			// Start running
+			m.append("Running query…")
+			m.runningKQL = true
+			return m, m.runKQLCmd(q)
+		}
 		// Handle extended config commands
 		if strings.HasPrefix(input, "config ") {
 			sub := strings.TrimSpace(strings.TrimPrefix(input, "config "))
@@ -286,7 +342,7 @@ func (m model) handleConfigSubcommand(sub string) (tea.Model, tea.Cmd) {
 // handleListKey processes keys while in list modes (subscriptions or insights resources)
 func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc":
+	case keyEsc:
 		switch m.mode {
 		case modeListSubscriptions:
 			m.append("Closed subscriptions panel.")
@@ -299,6 +355,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeListSubscriptions:
 			if sel, ok := m.list.SelectedItem().(subscriptionItem); ok {
+				logging.Info("Subscription selected", "id", sel.s.ID, "name", sel.s.DisplayName)
 				if err := m.cfg.ValidateAndUpdateSetting(keyAzureSubscriptionID, sel.s.ID); err != nil {
 					m.append("Failed to set subscription: " + err.Error())
 				} else {
@@ -308,6 +365,7 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		case modeListInsightsResources:
 			if sel, ok := m.list.SelectedItem().(insightsResourceItem); ok {
+				logging.Info("Insights resource selected", "name", sel.r.Name, "appId", sel.r.ApplicationID)
 				if err := m.cfg.ValidateAndUpdateSetting("applicationInsightsAppId", sel.r.ApplicationID); err != nil {
 					m.append("Failed to set Application Insights resource: " + err.Error())
 				} else {
@@ -360,4 +418,192 @@ func (m model) handleAuthError(msg authErrorMsg) (tea.Model, tea.Cmd) {
 	m.append("Tips: verify Tenant and Client ID, network access, and permissions in Azure Portal: https://portal.azure.com")
 	m.append("Type 'login' to try again or 'help'.")
 	return m, nil
+}
+
+// handleKQLResult processes the outcome of a KQL execution
+func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
+	m.runningKQL = false
+	if res.err != nil {
+		logging.Error("KQL result error", "error", res.err.Error())
+		m.append(res.err.Error())
+		m.haveResults = false
+		return m, nil
+	}
+	// Zero tables case
+	if len(res.columns) == 0 && len(res.rows) == 0 {
+		m.append(fmt.Sprintf("Query complete in %.3fs · 0 rows", res.duration.Seconds()))
+		m.append("No results.")
+		m.haveResults = false
+		return m, nil
+	}
+	// Build snapshot
+	summary := fmt.Sprintf("Query complete in %.3fs · %d rows · table: %s", res.duration.Seconds(), len(res.rows), firstNonEmpty(res.tableName, "PrimaryResult"))
+	m.append(summary)
+	snapshot := m.renderSnapshot(res.columns, res.rows)
+	if snapshot != "" {
+		m.append(snapshot)
+	}
+	m.append("Press Enter to open interactively.")
+	// Store for interactive
+	m.lastColumns = res.columns
+	m.lastRows = res.rows
+	m.lastTable = res.tableName
+	m.lastDuration = res.duration
+	m.haveResults = true
+	// Scroll to bottom for visibility
+	if m.followTail || m.vp.AtBottom() {
+		m.vp.GotoBottom()
+	}
+	return m, nil
+}
+
+// renderSnapshot builds a Bubbles table string with dynamic columns, limited rows
+func (m *model) renderSnapshot(columns []appinsights.Column, rows [][]interface{}) string {
+	// Limit rows to fetch size
+	maxRows := m.cfg.LogFetchSize
+	if maxRows <= 0 {
+		maxRows = 50
+	}
+	if len(rows) < maxRows {
+		maxRows = len(rows)
+	}
+	// Build columns definitions with equal widths
+	colCount := len(columns)
+	if colCount == 0 {
+		return ""
+	}
+	width := m.vp.Width
+	if width <= 0 {
+		width = 80
+	}
+	// Reserve minimal padding for borders already handled by container; just split equally
+	per := width / colCount
+	if per < 5 {
+		per = 5
+	}
+	cols := make([]table.Column, 0, colCount)
+	for _, c := range columns {
+		cols = append(cols, table.Column{Title: c.Name, Width: per})
+	}
+	// Build rows as []table.Row (slice of string)
+	trows := make([]table.Row, 0, maxRows)
+	for i := 0; i < maxRows; i++ {
+		r := rows[i]
+		tr := make([]string, 0, colCount)
+		for j := 0; j < colCount && j < len(r); j++ {
+			v := r[j]
+			if v == nil {
+				tr = append(tr, "")
+				continue
+			}
+			// Format primitives via fmt.Sprint
+			tr = append(tr, sprintAny(v))
+		}
+		// ensure length matches columns
+		for len(tr) < colCount {
+			tr = append(tr, "")
+		}
+		trows = append(trows, tr)
+	}
+
+	tm := table.New(
+		table.WithColumns(cols),
+		table.WithRows(trows),
+		table.WithWidth(width),
+		table.WithHeight(min(10, m.vp.Height)),
+	)
+	// Not focused in snapshot mode
+	tm.Blur()
+	return tm.View()
+}
+
+// initInteractiveTable builds a focused table model with all rows and columns
+func (m *model) initInteractiveTable() {
+	columns := m.lastColumns
+	rows := m.lastRows
+	colCount := len(columns)
+	if colCount == 0 {
+		m.tbl = table.New()
+		return
+	}
+	width := m.vp.Width
+	if width <= 0 {
+		width = 80
+	}
+	per := width / colCount
+	if per < 5 {
+		per = 5
+	}
+	cols := make([]table.Column, 0, colCount)
+	for _, c := range columns {
+		cols = append(cols, table.Column{Title: c.Name, Width: per})
+	}
+	trows := make([]table.Row, 0, len(rows))
+	for _, r := range rows {
+		tr := make([]string, 0, colCount)
+		for j := 0; j < colCount && j < len(r); j++ {
+			v := r[j]
+			if v == nil {
+				tr = append(tr, "")
+			} else {
+				tr = append(tr, sprintAny(v))
+			}
+		}
+		for len(tr) < colCount {
+			tr = append(tr, "")
+		}
+		trows = append(trows, tr)
+	}
+	m.tbl = table.New(
+		table.WithColumns(cols),
+		table.WithRows(trows),
+		table.WithWidth(width),
+		table.WithHeight(m.vp.Height),
+		table.WithFocused(true),
+	)
+}
+
+func firstNonEmpty(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
+}
+
+func sprintAny(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	case float64:
+		// avoid scientific notation for whole numbers if common in KQL
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case float32:
+		if t == float32(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(float64(t), 'f', -1, 32)
+	case int, int8, int16, int32, int64:
+		return fmt.Sprintf("%v", t)
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprintf("%v", t)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", t)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

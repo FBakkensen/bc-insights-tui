@@ -34,9 +34,10 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 - [x] Step 0: Remove existing UI and UI tests
 - [x] Step 1: Login (device flow)
 - [x] Step 2: Select subscription
-- [ ] Step 3: Select Application Insights resource
-- [ ] Step 4: Set / Get configuration
-- [ ] Step 5: Type and execute KQL
+- [x] Step 3: Select Application Insights resource
+- [x] Step 4: Set / Get configuration
+- [ ] Step 5: Single-line KQL execute
+- [ ] Step 6: Multi-line KQL editor mode
 
 ## Implementation order (clean rebuild)
 
@@ -72,14 +73,18 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
   - `get key` / `config` to dump current settings.
 - Echo confirmations and validation errors to scrollback.
 
-### Step 5 — Type and execute query (KQL)
+### Step 5 — Single-line KQL execute
 - Default: single-line chat input where `kql: <query>` executes immediately.
-- Editor mode for multi-line KQL:
-  - Command `edit` toggles textarea to multi-line mode (higher height, InsertNewline enabled). Ctrl+Enter submits; Esc cancels editor mode.
 - Execution flow:
   - Append “Running…” message; upon completion append a summary and a results snapshot (rendered using bubbles/table to a string) into scrollback.
   - Provide hint: “Press Enter to open interactively.”
   - When activated, switch top panel to an interactive table (bubbles/table) with dynamic columns from the KQL `project` result. Esc returns to scrollback.
+
+See the detailed spec and tests: `docs/specs/step-5-single-line-kql.md`.
+
+### Step 6 — Multi-line KQL editor mode
+- Command `edit` toggles textarea to multi-line mode (higher height, InsertNewline enabled).
+- Ctrl+Enter submits the query; Esc cancels editor mode and returns to single-line mode.
 
 ## Command summary (initial set)
 
@@ -136,8 +141,11 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 4) Config
 - `set/get/config` work with validation and persistence; confirmations appear in chat.
 
-5) KQL
+5) Single-line KQL execute
 - `kql:` runs and prints summary + table snapshot to scrollback; “Open interactively” hint works; table panel supports navigation; Esc returns.
+
+6) Multi-line KQL editor mode
+- `edit` toggles multi-line mode; Ctrl+Enter submits multi-line query; Esc cancels and returns to single-line mode.
 
 ## References (patterns used)
 

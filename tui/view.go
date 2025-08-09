@@ -10,9 +10,12 @@ func (m model) View() string {
 		return ""
 	}
 	var top string
-	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
+	switch m.mode {
+	case modeListSubscriptions, modeListInsightsResources:
 		top = m.vpStyle.Render(m.list.View())
-	} else {
+	case modeTableResults:
+		top = m.vpStyle.Render(m.tbl.View())
+	default:
 		top = m.vpStyle.Render(m.vp.View())
 	}
 	bottom := m.ta.View()
