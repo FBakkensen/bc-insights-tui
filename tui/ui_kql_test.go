@@ -97,15 +97,14 @@ func TestKQL_SnapshotAndOpenInteractively(t *testing.T) {
 	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
 	m2Any, _ := m.Update(kqlResultMsg{tableName: "PrimaryResult", columns: cols, rows: rows, duration: 10 * time.Millisecond})
 	m2 := m2Any.(model)
-	if !strings.Contains(m2.content, "Press Enter to open interactively.") {
+	if !strings.Contains(m2.content, "Press F6 to open interactively.") {
 		t.Fatalf("expected hint to open interactively; got: %q", m2.content)
 	}
-	// Press enter with empty chat
-	m2.ta.SetValue("")
-	m3Any, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	// Press F6 to open interactively
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyF6})
 	m3 := m3Any.(model)
 	if m3.mode != modeTableResults {
-		t.Fatalf("expected modeTableResults after empty enter; got %v", m3.mode)
+		t.Fatalf("expected modeTableResults after F6; got %v", m3.mode)
 	}
 	// Verify returnMode was set
 	if m3.returnMode != modeChat {

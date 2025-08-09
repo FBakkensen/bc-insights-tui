@@ -247,7 +247,6 @@ func (m *model) showKeys() {
 	m.append("    F6            — Open last results interactively")
 	m.append("  Chat mode:")
 	m.append("    Enter          — Submit command (e.g., 'edit', 'subs', 'resources', 'config')")
-	m.append("    Enter (empty)  — Open last results interactively")
 	m.append("  Editor mode:")
 	m.append("    Enter          — Insert newline")
 	m.append("    F5 or Ctrl+R   — Run query")

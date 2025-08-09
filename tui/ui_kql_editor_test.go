@@ -124,7 +124,7 @@ func TestEditor_Submit_RunsAndStaysInEditor(t *testing.T) {
 	success := kqlResultMsg{tableName: "PrimaryResult", columns: []appinsights.Column{{Name: "x"}}, rows: [][]interface{}{{"ok"}}, duration: 0}
 	m4Any, _ := m3.Update(success)
 	m4 := m4Any.(model)
-	if !strings.Contains(m4.content, "Press Esc to exit editor") {
+	if !strings.Contains(m4.content, "Press Esc to exit editor, then F6 to open interactively.") {
 		t.Fatalf("expected interactive hint after success; got: %q", m4.content)
 	}
 }

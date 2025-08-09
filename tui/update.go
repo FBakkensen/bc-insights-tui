@@ -283,10 +283,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		input := strings.TrimSpace(m.ta.Value())
 		m.ta.Reset()
 		if input == "" {
-			// If we have results, open interactive table on empty Enter
-			if m.haveResults {
-				return m.openTableFromLastResults()
-			}
+			// No implicit open; F6 is the only way to open interactively
 			return m, nil
 		}
 		m.append("> " + input)
@@ -593,9 +590,9 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 		m.append(snapshot)
 	}
 	if m.mode == modeKQLEditor {
-		m.append("Press Esc to exit editor, then Enter to open interactively.")
+		m.append("Press Esc to exit editor, then F6 to open interactively.")
 	} else {
-		m.append("Press Enter to open interactively.")
+		m.append("Press F6 to open interactively.")
 	}
 	// Store for interactive
 	m.lastColumns = res.columns
