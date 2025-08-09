@@ -66,12 +66,17 @@ type model struct {
 	lastDuration time.Duration
 	haveResults  bool
 	runningKQL   bool
+
+	// editor (Step 6)
+	editorDesiredHeight int
+	origPrompt          string
 }
 
 type uiMode int
 
 const (
 	modeChat uiMode = iota
+	modeKQLEditor
 	modeListSubscriptions
 	modeListInsightsResources
 	modeTableResults
@@ -128,19 +133,21 @@ func initialModel(cfg config.Config) model {
 	l.SetShowHelp(false)
 
 	m := model{
-		vp:              vp,
-		ta:              ta,
-		list:            l,
-		tbl:             table.New(),
-		mode:            modeChat,
-		cfg:             cfg,
-		authenticator:   a,
-		authState:       auth.AuthStateUnknown,
-		maxContentWidth: 120,
-		vpStyle:         vpStyle,
-		containerStyle:  lipgloss.NewStyle(),
-		followTail:      true,
-		kqlClient:       nil,
+		vp:                  vp,
+		ta:                  ta,
+		list:                l,
+		tbl:                 table.New(),
+		mode:                modeChat,
+		cfg:                 cfg,
+		authenticator:       a,
+		authState:           auth.AuthStateUnknown,
+		maxContentWidth:     120,
+		vpStyle:             vpStyle,
+		containerStyle:      lipgloss.NewStyle(),
+		followTail:          true,
+		kqlClient:           nil,
+		editorDesiredHeight: 8,
+		origPrompt:          "> ",
 	}
 	m.append("Welcome to bc-insights-tui (chat-first).")
 	m.append("Step 1: Login using Azure Device Flow.")

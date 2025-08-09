@@ -34,6 +34,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResize(msg)
 	case tea.KeyMsg:
 		return m.handleKeyMessage(msg)
+	case submitEditorMsg:
+		return m.handleEditorSubmit()
 	case deviceCodeMsg:
 		return m.handleDeviceCode(msg)
 	case authSuccessMsg:
@@ -55,6 +57,12 @@ func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// When in list mode, handle Esc and selection differently
 	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
 		return m.handleListKey(msg)
+	}
+	// Editor mode key handling
+	if m.mode == modeKQLEditor {
+		if m2, cmd, handled := m.handleEditorKey(msg); handled {
+			return m2, cmd
+		}
 	}
 	// When in table mode, handle Esc to return to chat; delegate nav to table
 	if m.mode == modeTableResults {
@@ -132,6 +140,30 @@ func (m model) handleComponentUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// handleEditorKey processes key events in multi-line editor mode.
+// Returns (model, cmd, handled) where handled indicates the key was consumed.
+func (m model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		logging.Info("Exiting editor mode (cancel)")
+		m.mode = modeChat
+		m.ta.KeyMap.InsertNewline.SetEnabled(false)
+		m.ta.Prompt = m.origPrompt
+		m.append("Canceled edit.")
+		return m, nil, true
+	case tea.KeyEnter:
+		// Let textarea handle newline insertion; not handled here
+	}
+	// Detect common submit chords via string (Windows terminals often map ctrl+enter to ctrl+m)
+	if s := msg.String(); s == "ctrl+enter" || s == "ctrl+m" || s == "ctrl+j" || s == "alt+enter" || s == "ctrl+s" || s == "ctrl+e" || s == "ctrl+r" {
+		return m, func() tea.Msg { return submitEditorMsg{} }, true
+	}
+	// Forward to textarea for normal editing behavior
+	var cmd tea.Cmd
+	m.ta, cmd = m.ta.Update(msg)
+	return m, cmd, true
+}
+
 func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width, m.height = msg.Width, msg.Height
 	// Desired content width: cap at maxContentWidth; center horizontally via container padding
@@ -145,8 +177,26 @@ func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 		innerWidth = 10
 	}
 	m.ta.SetWidth(innerWidth)
+	// Compute textarea height depending on mode
+	taHeight := m.ta.Height()
+	if m.mode == modeKQLEditor {
+		// Aim for desired height but cap to available space (leave border + spacer + min vp)
+		maxTA := m.height - 2 - 1 - 3 // borders + spacer + min vp 3
+		if maxTA < 3 {
+			maxTA = 3
+		}
+		h := m.editorDesiredHeight
+		if h > maxTA {
+			h = maxTA
+		}
+		if h < 3 {
+			h = 3
+		}
+		m.ta.SetHeight(h)
+		taHeight = h
+	}
 	// Leave one line spacer between viewport and textarea
-	vpHeight := m.height - m.ta.Height() - 1 - 2 // -2 for viewport border
+	vpHeight := m.height - taHeight - 1 - 2 // -2 for viewport border
 	if vpHeight < 3 {
 		vpHeight = 3
 	}
@@ -228,6 +278,26 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
+	case "edit":
+		// Enter multi-line editor mode
+		logging.Info("Entering editor mode")
+		m.mode = modeKQLEditor
+		m.ta.KeyMap.InsertNewline.SetEnabled(true)
+		m.origPrompt = m.ta.Prompt
+		m.ta.Prompt = "KQL> "
+		// Resize textarea height on next WindowSize or compute now using current height
+		// Ensure focus remains on textarea
+		var focusCmd tea.Cmd
+		if !m.ta.Focused() {
+			m.ta, focusCmd = m.ta.Update(tea.FocusMsg{})
+		}
+		// Show helper hint
+		m.append("Ctrl+Enter (or Ctrl+S) to run · Esc to cancel")
+		// Trigger a resize recompute to adjust heights
+		if focusCmd != nil {
+			return m, tea.Batch(focusCmd, tea.WindowSize())
+		}
+		return m, tea.WindowSize()
 	case "subs":
 		logging.Debug("Entering list subscriptions mode")
 		// Open subscriptions list panel and load items
@@ -271,6 +341,37 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 		m.append("Unknown command. Type 'help'.")
 	}
 	return m, nil
+}
+
+// internal message and handler for editor submission
+type submitEditorMsg struct{}
+
+func (m model) handleEditorSubmit() (tea.Model, tea.Cmd) {
+	// Normalize line endings and trim
+	raw := m.ta.Value()
+	// Don't mutate textarea content in place for now; we will reset after submission/cancel
+	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	trimmed := strings.TrimSpace(normalized)
+	if trimmed == "" {
+		m.append("Query cannot be empty.")
+		return m, nil
+	}
+	// Log safe details and exit editor mode before running
+	logging.Info("Submitting editor query")
+	// Echo first line + ellipsis
+	firstLine := trimmed
+	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
+		firstLine = firstLine[:idx] + " …"
+	}
+	m.append("> " + firstLine)
+	m.append("Running…")
+	m.mode = modeChat
+	m.ta.KeyMap.InsertNewline.SetEnabled(false)
+	m.ta.Prompt = m.origPrompt
+	m.ta.Reset()
+	// Dispatch KQL pipeline
+	return m, m.runKQLCmd(trimmed)
 }
 
 // handleConfigSubcommand parses and executes `config get` and `config set` operations
