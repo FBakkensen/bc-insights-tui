@@ -218,3 +218,100 @@ func TestEditor_Resize_TinyTerminalStillValid(t *testing.T) {
 		t.Fatalf("viewport height below minViewportHeight: %d", m3.vp.Height)
 	}
 }
+
+func TestEditorMode_F6_WithResults(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+	cap := &kqlCapture{}
+	m.kqlClient = cap
+
+	// Enter editor mode
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+
+	// Add a multi-line query to the editor
+	m2.ta.SetValue("traces\n| take 1\n| project timestamp")
+
+	// Set up results
+	cols := []appinsights.Column{{Name: "timestamp"}}
+	rows := [][]interface{}{{"2023-01-01T00:00:00Z"}}
+	m2.lastColumns = cols
+	m2.lastRows = rows
+	m2.lastTable = "PrimaryResult"
+	m2.haveResults = true
+
+	// Press F6 in editor mode
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m3 := m3Any.(model)
+
+	// Should switch to table mode
+	if m3.mode != modeTableResults {
+		t.Fatalf("expected modeTableResults after F6; got %v", m3.mode)
+	}
+	// Should store editor mode for return
+	if m3.returnMode != modeKQLEditor {
+		t.Fatalf("expected returnMode to be modeKQLEditor; got %v", m3.returnMode)
+	}
+	// Should show opened message
+	if !strings.Contains(m3.content, "Opened results table.") {
+		t.Fatalf("expected opened message; got: %q", m3.content)
+	}
+
+	// Press Esc to return to editor
+	m4Any, _ := m3.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m4 := m4Any.(model)
+
+	// Should return to editor mode
+	if m4.mode != modeKQLEditor {
+		t.Fatalf("expected to return to modeKQLEditor after Esc; got %v", m4.mode)
+	}
+	// Should preserve editor content
+	if !strings.Contains(m4.ta.Value(), "traces") {
+		t.Fatalf("expected editor content to be preserved; got: %q", m4.ta.Value())
+	}
+	// Should still have InsertNewline enabled
+	if !m4.ta.KeyMap.InsertNewline.Enabled() {
+		t.Fatalf("expected InsertNewline to remain enabled after return to editor")
+	}
+	// Should show closed message
+	if !strings.Contains(m4.content, "Closed results table.") {
+		t.Fatalf("expected closed message; got: %q", m4.content)
+	}
+	// Verify returnMode was cleared
+	if m4.returnMode != 0 {
+		t.Fatalf("expected returnMode to be cleared after close; got %v", m4.returnMode)
+	}
+}
+
+func TestEditorMode_F6_WithoutResults(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+
+	// Enter editor mode
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+
+	// Add content to editor
+	m2.ta.SetValue("traces | take 5")
+	// No results
+	m2.haveResults = false
+
+	// Press F6 in editor mode
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m3 := m3Any.(model)
+
+	// Should remain in editor mode
+	if m3.mode != modeKQLEditor {
+		t.Fatalf("expected to remain in modeKQLEditor; got %v", m3.mode)
+	}
+	// Should preserve editor content
+	if !strings.Contains(m3.ta.Value(), "traces | take 5") {
+		t.Fatalf("expected editor content to be preserved; got: %q", m3.ta.Value())
+	}
+	// Should show no results message
+	if !strings.Contains(m3.content, "No results to open.") {
+		t.Fatalf("expected no results message; got: %q", m3.content)
+	}
+}

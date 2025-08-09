@@ -54,6 +54,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle F6 globally (from both chat and editor modes)
+	if msg.String() == "f6" {
+		if m.mode == modeChat || m.mode == modeKQLEditor {
+			return m.openTableFromLastResults()
+		}
+	}
+
 	// When in list mode, handle Esc and selection differently
 	if m.mode == modeListSubscriptions || m.mode == modeListInsightsResources {
 		return m.handleListKey(msg)
@@ -64,20 +71,9 @@ func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m2, cmd
 		}
 	}
-	// When in table mode, handle Esc to return to chat; delegate nav to table
+	// When in table mode, handle Esc to return to previous mode; delegate nav to table
 	if m.mode == modeTableResults {
-		switch msg.String() {
-		case keyEsc:
-			m.mode = modeChat
-			m.append("Closed results table.")
-			if m.followTail || m.vp.AtBottom() {
-				m.vp.GotoBottom()
-			}
-			return m, nil
-		}
-		var cmd tea.Cmd
-		m.tbl, cmd = m.tbl.Update(msg)
-		return m, cmd
+		return m.handleTableKey(msg)
 	}
 	// In chat mode: Let textarea consume keys first so typing works
 	var cmd tea.Cmd
@@ -85,6 +81,47 @@ func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Then handle global keys and Enter submission
 	m2, cmd2 := m.handleKey(msg)
 	return m2, tea.Batch(cmd, cmd2)
+}
+
+// handleTableKey processes key events in table results mode
+func (m model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyEsc:
+		// Restore to the mode we were in before opening the table
+		previousMode := m.returnMode
+		if previousMode == modeChat || previousMode == modeKQLEditor {
+			m.mode = previousMode
+		} else {
+			// Fallback to chat if returnMode is not set or invalid
+			m.mode = modeChat
+		}
+
+		// Log the close action
+		logging.Info("Closing interactive table",
+			"action", "close_interactive",
+			"returnedToMode", func() string {
+				switch m.mode {
+				case modeChat:
+					return "chat"
+				case modeKQLEditor:
+					return "editor"
+				default:
+					return "unknown"
+				}
+			}(),
+		)
+
+		// Clear returnMode
+		m.returnMode = 0
+		m.append("Closed results table.")
+		if m.followTail || m.vp.AtBottom() {
+			m.vp.GotoBottom()
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.tbl, cmd = m.tbl.Update(msg)
+	return m, cmd
 }
 
 func (m model) handleSubsLoaded(msg subsLoadedMsg) (tea.Model, tea.Cmd) {
@@ -248,10 +285,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if input == "" {
 			// If we have results, open interactive table on empty Enter
 			if m.haveResults {
-				// Build table model and switch mode
-				m.initInteractiveTable()
-				m.mode = modeTableResults
-				return m, nil
+				return m.openTableFromLastResults()
 			}
 			return m, nil
 		}

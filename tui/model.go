@@ -32,10 +32,11 @@ type model struct {
 	ta textarea.Model
 
 	// top panel alternative components
-	list list.Model
-	tbl  table.Model
-	mode uiMode
-	cfg  config.Config
+	list       list.Model
+	tbl        table.Model
+	mode       uiMode
+	returnMode uiMode // stores the authoring mode before opening table view
+	cfg        config.Config
 
 	// chat content
 	content string
@@ -243,8 +244,10 @@ func (m *model) showKeys() {
 	m.append("Keybindings:")
 	m.append("  Global:")
 	m.append("    Esc / Ctrl+C  — Quit (or close panel)")
+	m.append("    F6            — Open last results interactively")
 	m.append("  Chat mode:")
 	m.append("    Enter          — Submit command (e.g., 'edit', 'subs', 'resources', 'config')")
+	m.append("    Enter (empty)  — Open last results interactively")
 	m.append("  Editor mode:")
 	m.append("    Enter          — Insert newline")
 	m.append("    F5 or Ctrl+R   — Run query")
@@ -573,4 +576,44 @@ func mapKQLError(err error, timeoutSec int, ctxErr error) error {
 		}
 		return err
 	}
+}
+
+// openTableFromLastResults opens the interactive table view from last results
+// if available, while preserving the current authoring mode for return.
+func (m *model) openTableFromLastResults() (model, tea.Cmd) {
+	if !m.haveResults {
+		// No-op with optional hint
+		m.append("No results to open.")
+		return *m, nil
+	}
+
+	// Store the current authoring mode for restoration on close
+	if m.mode == modeChat || m.mode == modeKQLEditor {
+		m.returnMode = m.mode
+	}
+
+	// Log the action with metadata
+	logging.Info("Opening interactive table from last results",
+		"action", "open_interactive",
+		"rowCount", fmt.Sprintf("%d", len(m.lastRows)),
+		"columnCount", fmt.Sprintf("%d", len(m.lastColumns)),
+		"tableName", firstNonEmpty(m.lastTable, "PrimaryResult"),
+		"fromMode", func() string {
+			switch m.returnMode {
+			case modeChat:
+				return "chat"
+			case modeKQLEditor:
+				return "editor"
+			default:
+				return "unknown"
+			}
+		}(),
+	)
+
+	// Initialize interactive table and switch mode
+	m.initInteractiveTable()
+	m.mode = modeTableResults
+	m.append("Opened results table.")
+
+	return *m, nil
 }
