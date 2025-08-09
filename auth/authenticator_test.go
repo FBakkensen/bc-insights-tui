@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/FBakkensen/bc-insights-tui/config"
+	keyring "github.com/zalando/go-keyring"
 )
 
 func TestNewAuthenticator(t *testing.T) {
@@ -116,5 +118,45 @@ func TestAuthState_Constants(t *testing.T) {
 			t.Errorf("Duplicate auth state value found: %d", state)
 		}
 		stateValues[state] = true
+	}
+}
+
+func TestBackupFallbackAndClear(t *testing.T) {
+	cfg := config.OAuth2Config{TenantID: "t", ClientID: "c", Scopes: []string{"s"}}
+	a := NewAuthenticator(cfg)
+
+	// Ensure clean
+	_ = a.ClearToken()
+
+	// Simulate legacy JSON stored in backup only
+	legacy := map[string]interface{}{"refresh_token": "r123"}
+	raw, _ := json.Marshal(legacy)
+	svc, _ := KeyringEntryInfo()
+	bsvc, _ := KeyringBackupEntryInfo()
+	_ = keyring.Delete(svc, "oauth2-token")
+	if err := keyring.Set(bsvc, "oauth2-token-backup", string(raw)); err != nil {
+		t.Fatalf("failed to set backup: %v", err)
+	}
+
+	// getStoredToken should read backup, attempt to restore primary, and return a token
+	tok, err := a.getStoredToken()
+	if err != nil {
+		t.Fatalf("getStoredToken failed: %v", err)
+	}
+	if tok.RefreshToken == "" {
+		t.Fatalf("expected refresh token from legacy JSON, got empty")
+	}
+
+	// Now ClearToken should remove both entries
+	if err := a.ClearToken(); err != nil {
+		t.Logf("ClearToken returned warning: %v", err)
+	}
+	// Primary
+	if _, err := keyring.Get(svc, "oauth2-token"); err == nil {
+		t.Fatalf("primary entry still exists after clear")
+	}
+	// Backup
+	if _, err := keyring.Get(bsvc, "oauth2-token-backup"); err == nil {
+		t.Fatalf("backup entry still exists after clear")
 	}
 }

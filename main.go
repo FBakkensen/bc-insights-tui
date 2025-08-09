@@ -17,6 +17,7 @@ import (
 	"github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 	"github.com/FBakkensen/bc-insights-tui/tui"
+	keyring "github.com/zalando/go-keyring"
 )
 
 func main() {
@@ -71,40 +72,45 @@ func main() {
 func runNonInteractiveCommand(command string, cfg config.Config) error {
 	logging.Info("Running non-interactive command", "command", command)
 
-	// Support "logs" command with optional line count: logs or logs:N
-	if strings.HasPrefix(command, "logs") {
+	// Split optional argument (e.g., logs:250)
+	name := command
+	arg := ""
+	if idx := strings.Index(command, ":"); idx != -1 {
+		name = command[:idx]
+		arg = strings.TrimSpace(command[idx+1:])
+	}
+
+	// Special-case: logs[:N]
+	if name == "logs" {
 		lines := 200
-		if idx := strings.Index(command, ":"); idx != -1 {
-			countStr := strings.TrimSpace(command[idx+1:])
-			if countStr != "" {
-				if v, err := strconv.Atoi(countStr); err != nil || v <= 0 {
-					return fmt.Errorf("invalid logs line count: %q; use a positive integer (e.g., -run=logs:200)", countStr)
-				} else {
-					lines = v
-				}
+		if arg != "" {
+			v, err := strconv.Atoi(arg)
+			if err != nil || v <= 0 {
+				return fmt.Errorf("invalid logs line count: %q; use a positive integer (e.g., -run=logs:200)", arg)
 			}
+			lines = v
 		}
 		return tailLatestLogFileNonInteractive(lines)
 	}
 
-	switch command {
-	case "subs":
-		return listSubscriptionsNonInteractive(cfg)
-	case "login":
-		return loginNonInteractive(cfg)
-	case "resources":
-		return listInsightsResourcesNonInteractive(cfg)
-	case "config":
-		return showConfigNonInteractive(cfg)
-	case "config-save":
-		return saveConfigNonInteractive(cfg)
-	case "config-reset":
-		return resetConfigNonInteractive(cfg)
-	case "config-path":
-		return showConfigPathNonInteractive()
-	default:
-		return fmt.Errorf("unknown command: %s. Available commands: subs, login, resources, config, config-save, config-reset, config-path, logs[:N]", command)
+	// Command registry to keep complexity low
+	handlers := map[string]func() error{
+		"subs":         func() error { return listSubscriptionsNonInteractive(cfg) },
+		"login":        func() error { return loginNonInteractive(cfg) },
+		"keyring-test": func() error { return keyringTestNonInteractive(cfg) },
+		"keyring-info": func() error { return keyringInfoNonInteractive() },
+		"resources":    func() error { return listInsightsResourcesNonInteractive(cfg) },
+		"config":       func() error { return showConfigNonInteractive(cfg) },
+		"config-save":  func() error { return saveConfigNonInteractive(cfg) },
+		"config-reset": func() error { return resetConfigNonInteractive(cfg) },
+		"config-path":  func() error { return showConfigPathNonInteractive() },
+		"login-status": func() error { return loginStatusNonInteractive(cfg) },
 	}
+
+	if h, ok := handlers[name]; ok {
+		return h()
+	}
+	return fmt.Errorf("unknown command: %s. Available commands: subs, login, login-status, keyring-info, keyring-test, resources, config, config-save, config-reset, config-path, logs[:N]", command)
 }
 
 // tailLatestLogFileNonInteractive prints the last N lines of the newest log file in logs/.
@@ -457,5 +463,168 @@ func showConfigPathNonInteractive() error {
 		fmt.Printf("Config file path: %s (exists)\n", configPath)
 	}
 
+	return nil
+}
+
+// loginStatusNonInteractive prints diagnostics about stored auth state and attempts a silent refresh
+func loginStatusNonInteractive(cfg config.Config) error {
+	logging.Info("Running login status diagnostics")
+
+	// Basic environment context (no secrets)
+	uname := strings.TrimSpace(os.Getenv("USERNAME"))
+	udom := strings.TrimSpace(os.Getenv("USERDOMAIN"))
+	uprof := strings.TrimSpace(os.Getenv("USERPROFILE"))
+	pid := os.Getpid()
+	fmt.Println("Process/User Context:")
+	fmt.Printf("  PID: %d\n", pid)
+	if udom != "" || uname != "" {
+		if udom != "" {
+			fmt.Printf("  User: %s\\%s\n", udom, uname)
+		} else {
+			fmt.Printf("  User: %s\n", uname)
+		}
+	}
+	if uprof != "" {
+		fmt.Printf("  USERPROFILE: %s\n", uprof)
+	}
+
+	// Auth checks
+	authenticator := auth.NewAuthenticator(cfg.OAuth2)
+	present, err := authenticator.StoredRefreshTokenPresent()
+	if err != nil {
+		logging.Error("Keyring presence check failed", "error", err.Error())
+		fmt.Printf("Stored refresh token: error checking presence: %v\n", err)
+	} else if !present {
+		fmt.Println("Stored refresh token: not found (interactive login required)")
+	} else {
+		fmt.Println("Stored refresh token: found")
+	}
+
+	// Show effective keyring entry locations (primary and backup)
+	svc, key := auth.KeyringEntryInfo()
+	bsvc, bkey := auth.KeyringBackupEntryInfo()
+	fmt.Println()
+	fmt.Println("Keyring entries (effective):")
+	fmt.Printf("  Primary: %s / %s\n", svc, key)
+	fmt.Printf("  Backup:  %s / %s\n", bsvc, bkey)
+	if v := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_SERVICE")); v != "" {
+		fmt.Printf("  Env BCINSIGHTS_KEYRING_SERVICE=%s\n", v)
+	}
+	if v := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_NAMESPACE")); v != "" {
+		fmt.Printf("  Env BCINSIGHTS_KEYRING_NAMESPACE=%s\n", v)
+	}
+
+	// If present, attempt a silent token acquisition for ARM to validate refresh
+	if present {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		scope := "https://management.azure.com/.default"
+		fmt.Printf("Attempting silent refresh for scope: %s\n", scope)
+		tok, terr := authenticator.GetTokenForScopes(ctx, []string{scope})
+		if terr != nil {
+			logging.Error("Silent refresh test failed", "error", terr.Error())
+			fmt.Printf("Silent refresh: FAILED: %v\n", terr)
+		} else {
+			exp := tok.Expiry
+			if !exp.IsZero() {
+				fmt.Printf("Silent refresh: OK (access token exp %s)\n", exp.Format(time.RFC3339))
+			} else {
+				fmt.Println("Silent refresh: OK (no expiry in response)")
+			}
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("Tip: use -run=logs:200 to view recent authentication logs.")
+	return nil
+}
+
+// keyringTestNonInteractive validates OS keyring accessibility by creating, reading, and deleting a test credential.
+func keyringTestNonInteractive(cfg config.Config) error {
+	logging.Info("Running keyring self-test diagnostics")
+
+	// Basic environment context (no secrets)
+	uname := strings.TrimSpace(os.Getenv("USERNAME"))
+	udom := strings.TrimSpace(os.Getenv("USERDOMAIN"))
+	uprof := strings.TrimSpace(os.Getenv("USERPROFILE"))
+	pid := os.Getpid()
+	fmt.Println("Process/User Context:")
+	fmt.Printf("  PID: %d\n", pid)
+	if udom != "" || uname != "" {
+		if udom != "" {
+			fmt.Printf("  User: %s\\%s\n", udom, uname)
+		} else {
+			fmt.Printf("  User: %s\n", uname)
+		}
+	}
+	if uprof != "" {
+		fmt.Printf("  USERPROFILE: %s\n", uprof)
+	}
+
+	// Report presence of production refresh token (without secrets)
+	authenticator := auth.NewAuthenticator(cfg.OAuth2)
+	present, err := authenticator.StoredRefreshTokenPresent()
+	if err != nil {
+		logging.Error("Keyring presence check failed", "error", err.Error())
+		fmt.Printf("Stored refresh token: error checking presence: %v\n", err)
+	} else if !present {
+		fmt.Println("Stored refresh token: not found")
+	} else {
+		fmt.Println("Stored refresh token: found")
+	}
+
+	// Self-test entry lifecycle
+	const service = "bc-insights-tui"
+	testKey := fmt.Sprintf("keyring-selftest-%d", pid)
+	testValue := fmt.Sprintf("ok-%d", time.Now().Unix())
+
+	fmt.Printf("\nSelf-test: writing test credential (%s/%s) ...\n", service, testKey)
+	if werr := keyring.Set(service, testKey, testValue); werr != nil {
+		logging.Error("Keyring Set failed", "service", service, "key", testKey, "error", werr.Error())
+		fmt.Printf("  WRITE: FAIL (%v)\n", werr)
+		fmt.Println("Hint: Check Windows Credential Manager availability and that this process runs under your regular user context.")
+		return nil
+	}
+	fmt.Println("  WRITE: OK")
+
+	got, rerr := keyring.Get(service, testKey)
+	if rerr != nil {
+		logging.Error("Keyring Get failed", "service", service, "key", testKey, "error", rerr.Error())
+		fmt.Printf("  READ:  FAIL (%v)\n", rerr)
+	} else if strings.TrimSpace(got) != testValue {
+		logging.Warn("Keyring Get returned unexpected value", "service", service, "key", testKey)
+		fmt.Println("  READ:  WARN (unexpected value)")
+	} else {
+		fmt.Println("  READ:  OK")
+	}
+
+	if derr := keyring.Delete(service, testKey); derr != nil {
+		logging.Warn("Keyring Delete failed", "service", service, "key", testKey, "error", derr.Error())
+		fmt.Printf("  DELETE: WARN (%v)\n", derr)
+	} else {
+		fmt.Println("  DELETE: OK")
+	}
+
+	fmt.Println()
+	fmt.Println("Tip: If WRITE/READ intermittently fail across sessions, it indicates an OS credential store visibility or profile persistence issue.")
+	return nil
+}
+
+// keyringInfoNonInteractive prints the effective keyring service/key used for the refresh token and any env overrides
+func keyringInfoNonInteractive() error {
+	svc, key := auth.KeyringEntryInfo()
+	bsvc, bkey := auth.KeyringBackupEntryInfo()
+	fmt.Println("Keyring entry (refresh token):")
+	fmt.Printf("  Service: %s\n", svc)
+	fmt.Printf("  Key:     %s\n", key)
+	fmt.Println("Backup entry:")
+	fmt.Printf("  Service: %s\n", bsvc)
+	fmt.Printf("  Key:     %s\n", bkey)
+	if v := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_SERVICE")); v != "" {
+		fmt.Printf("Env BCINSIGHTS_KEYRING_SERVICE=%s\n", v)
+	}
+	if v := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_NAMESPACE")); v != "" {
+		fmt.Printf("Env BCINSIGHTS_KEYRING_NAMESPACE=%s\n", v)
+	}
 	return nil
 }

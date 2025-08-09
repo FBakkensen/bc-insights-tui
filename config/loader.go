@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"path/filepath"
 )
 
@@ -27,6 +28,8 @@ type OsFlagParser struct{}
 // Parse implements FlagParser.Parse using the real flag package
 func (fp *OsFlagParser) Parse(args []string) *ParsedFlags {
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	// Silence default usage/banner output when flags unknown to this FlagSet are present (e.g., -run)
+	fs.SetOutput(io.Discard)
 
 	// Define flags
 	configFile := fs.String("config", "", "Configuration file path")
@@ -35,7 +38,7 @@ func (fp *OsFlagParser) Parse(args []string) *ParsedFlags {
 	applicationInsights := fs.String(flagAppInsights, "", "Application Insights instrumentation key")
 	applicationInsightsID := fs.String(flagAppID, "", "Application Insights application ID")
 
-	_ = fs.Parse(args) // Ignore parse errors for now
+	_ = fs.Parse(args) // Ignore parse errors; we only care about known flags
 
 	flags := &ParsedFlags{}
 
