@@ -38,7 +38,11 @@ func (fp *OsFlagParser) Parse(args []string) *ParsedFlags {
 	applicationInsights := fs.String(flagAppInsights, "", "Application Insights instrumentation key")
 	applicationInsightsID := fs.String(flagAppID, "", "Application Insights application ID")
 
-	_ = fs.Parse(args) // Ignore parse errors; we only care about known flags
+	if err := fs.Parse(args); err != nil {
+		// Keep silent UX; known flags will still be visited below.
+		// Optionally add a debug log here if a logger is available.
+		_ = err
+	}
 
 	flags := &ParsedFlags{}
 

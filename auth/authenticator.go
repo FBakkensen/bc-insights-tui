@@ -307,8 +307,14 @@ func (a *Authenticator) getStoredToken() (*oauth2.Token, error) {
 				logging.Error("Failed to retrieve token from backup keyring", "error", bErr.Error())
 				return nil, fmt.Errorf("failed to get token from backup keyring: %w", bErr)
 			}
-			// Self-heal: restore primary from backup (best-effort)
-			if setErr := keyring.Set(keyringServiceName(), tokenKey, backupJSON); setErr != nil {
+			// Self-heal: restore primary from backup (best-effort). If backup is legacy JSON,
+			// prefer restoring the raw refresh token to keep storage format consistent.
+			restoreValue := backupJSON
+			var legacy oauth2.Token
+			if jsonErr := json.Unmarshal([]byte(backupJSON), &legacy); jsonErr == nil && strings.TrimSpace(legacy.RefreshToken) != "" {
+				restoreValue = legacy.RefreshToken
+			}
+			if setErr := keyring.Set(keyringServiceName(), tokenKey, restoreValue); setErr != nil {
 				logging.Warn("Failed to restore primary keyring entry from backup", "error", setErr.Error())
 			} else {
 				logging.Info("Restored primary keyring entry from backup")
@@ -665,7 +671,11 @@ func (a *Authenticator) handleTokenRefreshError(body []byte, statusCode int) err
 	// Attempt to decode error for clarity
 	var errObj map[string]interface{}
 	_ = json.Unmarshal(body, &errObj)
-	logging.Error("Refresh token exchange failed", "status", fmt.Sprintf("%d", statusCode), "body", string(body))
+	trimmed := string(body)
+	if len(trimmed) > 512 {
+		trimmed = trimmed[:512] + "...(truncated)"
+	}
+	logging.Error("Refresh token exchange failed", "status", fmt.Sprintf("%d", statusCode), "body", trimmed)
 
 	// Provide actionable error messages for common issues
 	if errDesc, ok := errObj["error_description"].(string); ok {

@@ -574,7 +574,8 @@ func keyringTestNonInteractive(cfg config.Config) error {
 	}
 
 	// Self-test entry lifecycle
-	const service = "bc-insights-tui"
+	// Use the effective service so diagnostics reflect the real environment (incl. env overrides)
+	service, _ := auth.KeyringEntryInfo()
 	testKey := fmt.Sprintf("keyring-selftest-%d", pid)
 	testValue := fmt.Sprintf("ok-%d", time.Now().Unix())
 
@@ -583,7 +584,7 @@ func keyringTestNonInteractive(cfg config.Config) error {
 		logging.Error("Keyring Set failed", "service", service, "key", testKey, "error", werr.Error())
 		fmt.Printf("  WRITE: FAIL (%v)\n", werr)
 		fmt.Println("Hint: Check Windows Credential Manager availability and that this process runs under your regular user context.")
-		return nil
+		return fmt.Errorf("keyring self-test write failed: %w", werr)
 	}
 	fmt.Println("  WRITE: OK")
 
@@ -591,9 +592,13 @@ func keyringTestNonInteractive(cfg config.Config) error {
 	if rerr != nil {
 		logging.Error("Keyring Get failed", "service", service, "key", testKey, "error", rerr.Error())
 		fmt.Printf("  READ:  FAIL (%v)\n", rerr)
+		_ = keyring.Delete(service, testKey)
+		return fmt.Errorf("keyring self-test read failed: %w", rerr)
 	} else if strings.TrimSpace(got) != testValue {
 		logging.Warn("Keyring Get returned unexpected value", "service", service, "key", testKey)
 		fmt.Println("  READ:  WARN (unexpected value)")
+		_ = keyring.Delete(service, testKey)
+		return fmt.Errorf("keyring self-test read returned unexpected value")
 	} else {
 		fmt.Println("  READ:  OK")
 	}
