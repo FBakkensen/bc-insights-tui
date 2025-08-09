@@ -99,7 +99,9 @@ func NewConfig() Config {
 // 3. Configuration files (JSON)
 // 4. Default values (lowest priority)
 func LoadConfig() Config {
-	return LoadConfigWithArgs(os.Args[1:])
+	// Use remaining args after the application's global flag.Parse()
+	// to avoid re-parsing unrelated flags (e.g., -run) in the config flag set.
+	return LoadConfigWithArgs(flag.Args())
 }
 
 // LoadConfigWithArgs loads configuration with the specified command line arguments
