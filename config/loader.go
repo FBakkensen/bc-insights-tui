@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"path/filepath"
 )
 
@@ -22,11 +23,20 @@ type ParsedFlags struct {
 }
 
 // OsFlagParser implements FlagParser using the real flag package
-type OsFlagParser struct{}
+// Lenient controls whether unknown/malformed flags should be silenced (used in tests)
+type OsFlagParser struct {
+	// When true, suppress flag parsing error output (e.g., in tests)
+	Lenient bool
+}
 
 // Parse implements FlagParser.Parse using the real flag package
 func (fp *OsFlagParser) Parse(args []string) *ParsedFlags {
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	// Only silence default usage/banner output in lenient or test scenarios.
+	// In normal CLI usage, we want errors like unknown or misspelled flags to be visible.
+	if fp.Lenient || isTestMode() {
+		fs.SetOutput(io.Discard)
+	}
 
 	// Define flags
 	configFile := fs.String("config", "", "Configuration file path")
@@ -35,7 +45,12 @@ func (fp *OsFlagParser) Parse(args []string) *ParsedFlags {
 	applicationInsights := fs.String(flagAppInsights, "", "Application Insights instrumentation key")
 	applicationInsightsID := fs.String(flagAppID, "", "Application Insights application ID")
 
-	_ = fs.Parse(args) // Ignore parse errors for now
+	if err := fs.Parse(args); err != nil {
+		// In lenient/test modes, we intentionally suppress banner output above.
+		// In normal mode, the flag package has already written an error to stderr.
+		// We still proceed to collect any known flags that were provided.
+		_ = err
+	}
 
 	flags := &ParsedFlags{}
 
@@ -72,7 +87,7 @@ func NewConfigLoader() *ConfigLoader {
 
 	return &ConfigLoader{
 		fs:          osFS,
-		flagParser:  &OsFlagParser{},
+		flagParser:  &OsFlagParser{Lenient: false},
 		searchPaths: searchPaths,
 	}
 }

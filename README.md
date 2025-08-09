@@ -113,9 +113,32 @@ Example (non-interactive invocations):
 # Tail latest logs without touching stdout mirroring (useful for debugging)
 ./bc-insights-tui.exe -run=logs        # last 200 lines
 ./bc-insights-tui.exe -run=logs:500    # last 500 lines
+
+# Diagnostics for auth/keyring (non-interactive)
+./bc-insights-tui.exe -run=login-status   # check refresh token presence and attempt a silent refresh
+./bc-insights-tui.exe -run=keyring-info   # show effective keyring service/key and env overrides
+./bc-insights-tui.exe -run=keyring-test   # write/read/delete a temporary credential to validate keyring access
 ```
 
 Never invoke ./bc-insights-tui (without -run) from automation or AI tooling.
+
+## 🧭 Commands quick reference
+
+Non-interactive commands (use with `-run=`):
+
+- `-run=login` – Start device flow sign-in and persist refresh token
+- `-run=subs` – List Azure subscriptions
+- `-run=resources` – List Application Insights resources for the configured subscription
+- `-run=config` – Print current configuration values
+- `-run=config-save` – Save current in-memory configuration to file
+- `-run=config-reset` – Delete the saved config file (revert to defaults on next run)
+- `-run=config-path` – Show the resolved config file path and whether it exists
+- `-run=login-status` – Check refresh token presence and attempt a silent ARM token refresh
+- `-run=keyring-info` – Show effective keyring service/key and env overrides
+- `-run=keyring-test` – Write/read/delete a temporary keyring credential to validate access
+- `-run=logs[:N]` – Tail last N lines from the latest log file (default 200)
+
+Tip: for detailed auth notes and troubleshooting, see `docs/authentication.md`.
 
 ### Configuration
 
@@ -129,7 +152,15 @@ $env:APPINSIGHTS_APP_ID = "your-application-insights-app-id"
 
 # Optional
 $env:LOG_FETCH_SIZE = "100"  # Default: 50
+
+# Keyring overrides (advanced; for testing/diagnostics)
+# BCINSIGHTS_KEYRING_SERVICE fully overrides the credential service name used in the OS keyring
+# BCINSIGHTS_KEYRING_NAMESPACE appends a suffix to the default service name (bc-insights-tui-<namespace>)
+$env:BCINSIGHTS_KEYRING_SERVICE = "bc-insights-tui"
+$env:BCINSIGHTS_KEYRING_NAMESPACE = "dev"
 ```
+
+See docs/authentication.md for details on the OAuth2 device flow, token storage, and troubleshooting frequent sign-ins.
 
 ## 🎮 Usage
 

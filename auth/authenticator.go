@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -26,11 +27,41 @@ import (
 var ErrNoStoredToken = errors.New("no stored token found")
 
 const (
-	// Service name for keyring storage
-	serviceName = "bc-insights-tui"
 	// tokenKey is not a credential but a key name for storing tokens in the system keyring
 	tokenKey = "oauth2-token" // #nosec G101
+	// backupTokenKey stores a duplicate refresh token for resilience against sporadic key loss
+	backupTokenKey = "oauth2-token-backup" // #nosec G101
 )
+
+// baseServiceName is the base service name for keyring storage (may be namespaced via env for tests/dev).
+const baseServiceName = "bc-insights-tui"
+
+// keyringServiceName resolves the effective keyring service name, allowing isolation in tests/dev.
+// Precedence:
+// 1) BCINSIGHTS_KEYRING_SERVICE (full override)
+// 2) BCINSIGHTS_KEYRING_NAMESPACE (suffix appended to base)
+// 3) baseServiceName
+func keyringServiceName() string {
+	if v := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_SERVICE")); v != "" {
+		return v
+	}
+	if ns := strings.TrimSpace(os.Getenv("BCINSIGHTS_KEYRING_NAMESPACE")); ns != "" {
+		return baseServiceName + "-" + ns
+	}
+	return baseServiceName
+}
+
+// KeyringEntryInfo returns the effective keyring service and key used to store the refresh token.
+// This is exported for diagnostics only.
+func KeyringEntryInfo() (service, key string) {
+	return keyringServiceName(), tokenKey
+}
+
+// KeyringBackupEntryInfo returns the backup keyring service and key used for redundant storage.
+// This is exported for diagnostics only.
+func KeyringBackupEntryInfo() (service, key string) {
+	return keyringServiceName(), backupTokenKey
+}
 
 // AuthState represents the current authentication state
 type AuthState int
@@ -235,26 +266,64 @@ func (a *Authenticator) SaveTokenSecurely(token *oauth2.Token) error {
 	}
 
 	// Store just the refresh token as the secret value (raw string, smallest footprint).
-	if err := keyring.Set(serviceName, tokenKey, token.RefreshToken); err != nil {
+	if err := keyring.Set(keyringServiceName(), tokenKey, token.RefreshToken); err != nil {
 		logging.Error("Failed to store refresh token in keyring", "error", err.Error())
 		return fmt.Errorf("failed to store refresh token in keyring: %w", err)
 	}
 
-	logging.Info("Token saved successfully to secure storage")
+	// Best-effort: write a backup copy to mitigate intermittent credential loss on some systems
+	if err := keyring.Set(keyringServiceName(), backupTokenKey, token.RefreshToken); err != nil {
+		logging.Warn("Failed to store backup refresh token in keyring", "error", err.Error())
+		// Non-fatal: continue, primary was saved
+	}
+
+	// Optional read-back verification (primary)
+	if v, err := keyring.Get(keyringServiceName(), tokenKey); err == nil {
+		if strings.TrimSpace(v) == "" {
+			logging.Warn("Primary keyring entry read-back is empty")
+		}
+	} else {
+		logging.Warn("Primary keyring entry read-back failed", "error", err.Error())
+	}
+
+	logging.Info("Token saved successfully to secure storage (with backup)")
 	return nil
 }
 
 // getStoredToken retrieves the stored token from the OS credential manager
 func (a *Authenticator) getStoredToken() (*oauth2.Token, error) {
 	logging.Debug("Retrieving stored token from keyring")
-	tokenJSON, err := keyring.Get(serviceName, tokenKey)
+	tokenJSON, err := keyring.Get(keyringServiceName(), tokenKey)
 	if err != nil {
 		if err == keyring.ErrNotFound {
-			logging.Info("No stored token found in keyring")
-			return nil, ErrNoStoredToken
+			logging.Info("No stored token found in primary keyring entry; attempting backup")
+			// Try backup entry
+			backupJSON, bErr := keyring.Get(keyringServiceName(), backupTokenKey)
+			if bErr != nil {
+				if bErr == keyring.ErrNotFound {
+					logging.Info("No stored token found in backup keyring entry")
+					return nil, ErrNoStoredToken
+				}
+				logging.Error("Failed to retrieve token from backup keyring", "error", bErr.Error())
+				return nil, fmt.Errorf("failed to get token from backup keyring: %w", bErr)
+			}
+			// Self-heal: restore primary from backup (best-effort). If backup is legacy JSON,
+			// prefer restoring the raw refresh token to keep storage format consistent.
+			restoreValue := backupJSON
+			var legacy oauth2.Token
+			if jsonErr := json.Unmarshal([]byte(backupJSON), &legacy); jsonErr == nil && strings.TrimSpace(legacy.RefreshToken) != "" {
+				restoreValue = legacy.RefreshToken
+			}
+			if setErr := keyring.Set(keyringServiceName(), tokenKey, restoreValue); setErr != nil {
+				logging.Warn("Failed to restore primary keyring entry from backup", "error", setErr.Error())
+			} else {
+				logging.Info("Restored primary keyring entry from backup")
+			}
+			tokenJSON = backupJSON
+		} else {
+			logging.Error("Failed to retrieve token from keyring", "error", err.Error())
+			return nil, fmt.Errorf("failed to get token from keyring: %w", err)
 		}
-		logging.Error("Failed to retrieve token from keyring", "error", err.Error())
-		return nil, fmt.Errorf("failed to get token from keyring: %w", err)
 	}
 
 	// Backward compatibility: previously we stored the full oauth2.Token JSON.
@@ -273,6 +342,19 @@ func (a *Authenticator) getStoredToken() (*oauth2.Token, error) {
 	}
 	logging.Debug("Successfully retrieved stored refresh token (raw)")
 	return &oauth2.Token{RefreshToken: rt}, nil
+}
+
+// StoredRefreshTokenPresent returns true if a refresh token is present in secure storage.
+// It avoids logging secrets and is intended for diagnostics.
+func (a *Authenticator) StoredRefreshTokenPresent() (bool, error) {
+	_, err := a.getStoredToken()
+	if err != nil {
+		if errors.Is(err, ErrNoStoredToken) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // RefreshTokenIfNeeded refreshes the token if it's expired
@@ -428,9 +510,31 @@ func (a *Authenticator) requestTokenWithRefresh(ctx context.Context, refreshToke
 // ClearToken removes the stored token
 func (a *Authenticator) ClearToken() error {
 	logging.Info("Clearing stored authentication token")
-	if err := keyring.Delete(serviceName, tokenKey); err != nil {
-		logging.Error("Failed to delete token from keyring", "error", err.Error())
-		return fmt.Errorf("failed to delete token from keyring: %w", err)
+	var firstErr error
+	if err := keyring.Delete(keyringServiceName(), tokenKey); err != nil {
+		if err == keyring.ErrNotFound {
+			logging.Info("Primary keyring entry not found during clear")
+		} else {
+			logging.Warn("Failed to delete primary token from keyring", "error", err.Error())
+			firstErr = err
+		}
+	} else {
+		logging.Info("Primary keyring entry deleted")
+	}
+	if err := keyring.Delete(keyringServiceName(), backupTokenKey); err != nil {
+		if err == keyring.ErrNotFound {
+			logging.Info("Backup keyring entry not found during clear")
+		} else {
+			logging.Warn("Failed to delete backup token from keyring", "error", err.Error())
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	} else {
+		logging.Info("Backup keyring entry deleted")
+	}
+	if firstErr != nil {
+		return fmt.Errorf("failed to clear one or more keyring entries: %w", firstErr)
 	}
 	logging.Info("Token successfully cleared from secure storage")
 	return nil
@@ -567,7 +671,11 @@ func (a *Authenticator) handleTokenRefreshError(body []byte, statusCode int) err
 	// Attempt to decode error for clarity
 	var errObj map[string]interface{}
 	_ = json.Unmarshal(body, &errObj)
-	logging.Error("Refresh token exchange failed", "status", fmt.Sprintf("%d", statusCode), "body", string(body))
+	trimmed := string(body)
+	if len(trimmed) > 512 {
+		trimmed = trimmed[:512] + "...(truncated)"
+	}
+	logging.Error("Refresh token exchange failed", "status", fmt.Sprintf("%d", statusCode), "body", trimmed)
 
 	// Provide actionable error messages for common issues
 	if errDesc, ok := errObj["error_description"].(string); ok {
