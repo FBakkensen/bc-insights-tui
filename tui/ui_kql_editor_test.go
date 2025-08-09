@@ -96,7 +96,7 @@ func TestEditor_Submit_EmptyShowsError(t *testing.T) {
 	}
 }
 
-func TestEditor_Submit_RunsAndExitsEditor(t *testing.T) {
+func TestEditor_Submit_RunsAndStaysInEditor(t *testing.T) {
 	m := newTestModel()
 	m.authState = auth.AuthStateCompleted
 	cap := &kqlCapture{}
@@ -111,8 +111,8 @@ func TestEditor_Submit_RunsAndExitsEditor(t *testing.T) {
 	// Submit via internal message
 	m3Any, cmd := m2.Update(submitEditorMsg{})
 	m3 := m3Any.(model)
-	if m3.mode != modeChat {
-		t.Fatalf("expected to exit editor mode on submit; got %v", m3.mode)
+	if m3.mode != modeKQLEditor {
+		t.Fatalf("expected to stay in editor mode on submit; got %v", m3.mode)
 	}
 	if !strings.Contains(m3.content, "> traces …") || !strings.Contains(m3.content, "Running…") {
 		t.Fatalf("expected echo and Running…; got: %q", m3.content)
@@ -124,8 +124,46 @@ func TestEditor_Submit_RunsAndExitsEditor(t *testing.T) {
 	success := kqlResultMsg{tableName: "PrimaryResult", columns: []appinsights.Column{{Name: "x"}}, rows: [][]interface{}{{"ok"}}, duration: 0}
 	m4Any, _ := m3.Update(success)
 	m4 := m4Any.(model)
-	if !strings.Contains(m4.content, "Press Enter to open interactively.") {
+	if !strings.Contains(m4.content, "Press Esc to exit editor") {
 		t.Fatalf("expected interactive hint after success; got: %q", m4.content)
+	}
+}
+
+func TestEditor_Submit_WithCtrlEnterKey(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+	cap := &kqlCapture{}
+	m.kqlClient = cap
+
+	// Enter editor
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	// Type query and press Ctrl+Enter to submit
+	m2.ta.SetValue("traces | take 1")
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	if cmd == nil {
+		t.Fatalf("expected submit command on ctrl+enter")
+	}
+}
+
+func TestEditor_Submit_NormalizesCRLF(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+	cap := &kqlCapture{}
+	m.kqlClient = cap
+
+	// Enter editor
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	// Use CRLF in buffer
+	m2.ta.SetValue("traces\r\n| take 1\r\n")
+	// Submit via internal message
+	m3Any, cmd := m2.Update(submitEditorMsg{})
+	_ = m3Any
+	if cmd == nil {
+		t.Fatalf("expected KQL run command")
 	}
 }
 

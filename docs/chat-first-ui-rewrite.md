@@ -90,7 +90,7 @@ Usage and behavior (implemented):
 - Enter `edit` in chat and press Enter to open the editor. Prompt switches to `KQL> `.
 - While editing:
   - Enter inserts a newline
-  - Ctrl+Enter submits (Ctrl+M also works in many terminals)
+  - Ctrl+Enter submits (Ctrl+M in some terminals)
   - Esc cancels and returns to chat
 - On submit, the first line of the query is echoed with an ellipsis and the query runs.
 - After completion, a summary and table snapshot are added to the scrollback with a hint to press Enter to open results interactively.

@@ -202,7 +202,7 @@ When you want to compose multi-line Kusto queries interactively:
 - The prompt changes to `KQL> ` and the input becomes multi-line.
 - Keys while editing:
   - Enter inserts a newline
-  - Ctrl+Enter submits the query (Ctrl+M works in some terminals)
+  - Ctrl+Enter submits the query (Ctrl+M in some terminals)
   - Esc cancels and returns to chat
 - On submit, the first line is echoed with an ellipsis and the query runs.
 - After results complete, you’ll see a summary, a compact table snapshot, and a hint: “Press Enter to open interactively.”

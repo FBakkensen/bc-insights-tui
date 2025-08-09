@@ -89,6 +89,15 @@ const keyAzureSubscriptionID = "azure.subscriptionId"
 const (
 	titleSelectSubscription = "Select Azure Subscription"
 	titleSelectInsights     = "Select Application Insights Resource"
+	// Prompts and hints
+	promptDefault = "> "
+	promptEditor  = "KQL> "
+	// Keep Ctrl+Enter in the hint to satisfy existing tests, but also advertise
+	// reliable keys (F5/Ctrl+R) that work across terminals on Windows.
+	hintEditor = "Ctrl+Enter (Ctrl+M) to run · F5 or Ctrl+R to run · Esc to cancel"
+	// Layout minimums
+	minViewportHeight = 3
+	minEditorHeight   = 3
 )
 
 // Minimal interface to App Insights KQL used by the UI (for tests and DI)
@@ -110,7 +119,7 @@ func initialModel(cfg config.Config) model {
 	ta.Placeholder = "Type 'login' to authenticate or 'help'"
 	ta.ShowLineNumbers = false
 	ta.Focus()
-	ta.Prompt = "> "
+	ta.Prompt = promptDefault
 	ta.CharLimit = 0
 	ta.SetHeight(3)
 	ta.SetWidth(80)
@@ -147,7 +156,7 @@ func initialModel(cfg config.Config) model {
 		followTail:          true,
 		kqlClient:           nil,
 		editorDesiredHeight: 8,
-		origPrompt:          "> ",
+		origPrompt:          promptDefault,
 	}
 	m.append("Welcome to bc-insights-tui (chat-first).")
 	m.append("Step 1: Login using Azure Device Flow.")
@@ -227,6 +236,24 @@ func (m *model) showConfig() {
 	if val, ok := settings["editorPanelRatio"]; ok {
 		m.append("    Editor Panel Ratio: " + val)
 	}
+}
+
+// showKeys appends a quick reference of active keybindings for major modes
+func (m *model) showKeys() {
+	m.append("Keybindings:")
+	m.append("  Global:")
+	m.append("    Esc / Ctrl+C  — Quit (or close panel)")
+	m.append("  Chat mode:")
+	m.append("    Enter          — Submit command (e.g., 'edit', 'subs', 'resources', 'config')")
+	m.append("  Editor mode:")
+	m.append("    Enter          — Insert newline")
+	m.append("    F5 or Ctrl+R   — Run query")
+	m.append("    Ctrl+Enter     — Run (may arrive as Ctrl+M in some terminals)")
+	m.append("    Esc            — Cancel edit")
+	m.append("  List panels (subscriptions/resources):")
+	m.append("    Up/Down, PgUp/PgDn — Navigate · Enter — Select · Esc — Close")
+	m.append("  Results table:")
+	m.append("    Up/Down/Left/Right — Navigate · Home/End — Jump · Esc — Close")
 }
 
 // msgs used by the update loop

@@ -145,17 +145,29 @@ func (m model) handleComponentUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		logging.Info("Exiting editor mode (cancel)")
+		logging.Info("Exiting editor mode (cancel)", "insertNewline", "true=>false", "prompt", promptEditor+"=>"+promptDefault)
 		m.mode = modeChat
 		m.ta.KeyMap.InsertNewline.SetEnabled(false)
 		m.ta.Prompt = m.origPrompt
+		// Discard the multi-line draft and restore single-line height
+		m.ta.Reset()
+		m.ta.SetHeight(3)
 		m.append("Canceled edit.")
-		return m, nil, true
+		// Ensure focus remains on textarea, then recalc layout immediately
+		var focusCmd tea.Cmd
+		if !m.ta.Focused() {
+			m.ta, focusCmd = m.ta.Update(tea.FocusMsg{})
+		}
+		if focusCmd != nil {
+			return m, tea.Batch(focusCmd, tea.WindowSize()), true
+		}
+		return m, tea.WindowSize(), true
 	case tea.KeyEnter:
 		// Let textarea handle newline insertion; not handled here
 	}
 	// Detect common submit chords via string (Windows terminals often map ctrl+enter to ctrl+m)
-	if s := msg.String(); s == "ctrl+enter" || s == "ctrl+m" || s == "ctrl+j" || s == "alt+enter" || s == "ctrl+s" || s == "ctrl+e" || s == "ctrl+r" {
+	// Also accept F5 and Ctrl+R as reliable run keys across terminals.
+	if s := msg.String(); s == "ctrl+enter" || s == "ctrl+m" || s == "alt+enter" || s == "f5" || s == "ctrl+r" {
 		return m, func() tea.Msg { return submitEditorMsg{} }, true
 	}
 	// Forward to textarea for normal editing behavior
@@ -181,24 +193,24 @@ func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	taHeight := m.ta.Height()
 	if m.mode == modeKQLEditor {
 		// Aim for desired height but cap to available space (leave border + spacer + min vp)
-		maxTA := m.height - 2 - 1 - 3 // borders + spacer + min vp 3
-		if maxTA < 3 {
-			maxTA = 3
+		maxTA := m.height - 2 - 1 - minViewportHeight // borders + spacer + min vp
+		if maxTA < minEditorHeight {
+			maxTA = minEditorHeight
 		}
 		h := m.editorDesiredHeight
 		if h > maxTA {
 			h = maxTA
 		}
-		if h < 3 {
-			h = 3
+		if h < minEditorHeight {
+			h = minEditorHeight
 		}
 		m.ta.SetHeight(h)
 		taHeight = h
 	}
 	// Leave one line spacer between viewport and textarea
 	vpHeight := m.height - taHeight - 1 - 2 // -2 for viewport border
-	if vpHeight < 3 {
-		vpHeight = 3
+	if vpHeight < minViewportHeight {
+		vpHeight = minViewportHeight
 	}
 	m.vp.Width = innerWidth
 	m.vp.Height = vpHeight
@@ -274,25 +286,27 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	}())
 	switch input {
 	case "help", "?":
-		m.append("Commands: help, subs, resources, config, config get <key>, config set <key>=<value>, kql: <query>, login, quit")
+		m.append("Commands: help, keys, subs, resources, config, config get <key>, config set <key>=<value>, kql: <query>, login, quit")
+		m.append("Tip: type 'keys' for keybindings.")
 	case "quit", "exit":
 		m.quitting = true
 		return m, tea.Quit
 	case "edit":
 		// Enter multi-line editor mode
-		logging.Info("Entering editor mode")
+		logging.Info("Entering editor mode", "insertNewline", "false=>true", "prompt", m.ta.Prompt+"=>"+promptEditor)
 		m.mode = modeKQLEditor
 		m.ta.KeyMap.InsertNewline.SetEnabled(true)
 		m.origPrompt = m.ta.Prompt
-		m.ta.Prompt = "KQL> "
+		m.ta.Prompt = promptEditor
 		// Resize textarea height on next WindowSize or compute now using current height
 		// Ensure focus remains on textarea
 		var focusCmd tea.Cmd
 		if !m.ta.Focused() {
 			m.ta, focusCmd = m.ta.Update(tea.FocusMsg{})
 		}
-		// Show helper hint
-		m.append("Ctrl+Enter (or Ctrl+S) to run · Esc to cancel")
+		// Show helper hint and keybindings
+		m.append(hintEditor)
+		m.showKeys()
 		// Trigger a resize recompute to adjust heights
 		if focusCmd != nil {
 			return m, tea.Batch(focusCmd, tea.WindowSize())
@@ -317,6 +331,9 @@ func (m model) handlePostAuthCommand(input string) (tea.Model, tea.Cmd) {
 	case "config":
 		// Show current configuration
 		m.showConfig()
+		return m, nil
+	case "keys":
+		m.showKeys()
 		return m, nil
 	default:
 		// Step 5: single-line KQL prefix
@@ -366,10 +383,7 @@ func (m model) handleEditorSubmit() (tea.Model, tea.Cmd) {
 	}
 	m.append("> " + firstLine)
 	m.append("Running…")
-	m.mode = modeChat
-	m.ta.KeyMap.InsertNewline.SetEnabled(false)
-	m.ta.Prompt = m.origPrompt
-	m.ta.Reset()
+	// Stay in editor mode while the query runs; keep multi-line editing active
 	// Dispatch KQL pipeline
 	return m, m.runKQLCmd(trimmed)
 }
@@ -544,7 +558,11 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 	if snapshot != "" {
 		m.append(snapshot)
 	}
-	m.append("Press Enter to open interactively.")
+	if m.mode == modeKQLEditor {
+		m.append("Press Esc to exit editor, then Enter to open interactively.")
+	} else {
+		m.append("Press Enter to open interactively.")
+	}
 	// Store for interactive
 	m.lastColumns = res.columns
 	m.lastRows = res.rows
