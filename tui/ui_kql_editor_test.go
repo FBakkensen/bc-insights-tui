@@ -129,7 +129,7 @@ func TestEditor_Submit_RunsAndStaysInEditor(t *testing.T) {
 	}
 }
 
-func TestEditor_Submit_WithCtrlEnterKey(t *testing.T) {
+func TestEditor_Submit_WithPortableShortcut(t *testing.T) {
 	m := newTestModel()
 	m.authState = auth.AuthStateCompleted
 	cap := &kqlCapture{}
@@ -139,11 +139,29 @@ func TestEditor_Submit_WithCtrlEnterKey(t *testing.T) {
 	m.ta.SetValue("edit")
 	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := m2Any.(model)
-	// Type query and press Ctrl+Enter to submit
+	// Type query and press Ctrl+R (reliable) to submit
 	m2.ta.SetValue("traces | take 1")
-	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
 	if cmd == nil {
-		t.Fatalf("expected submit command on ctrl+enter")
+		t.Fatalf("expected submit command on ctrl+r")
+	}
+}
+
+func TestEditor_Submit_WithF5(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+	cap := &kqlCapture{}
+	m.kqlClient = cap
+
+	// Enter editor
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	// Type query and press F5 to submit
+	m2.ta.SetValue("requests | take 1")
+	_, cmd := m2.Update(tea.KeyMsg{Type: tea.KeyF5})
+	if cmd == nil {
+		t.Fatalf("expected submit command on F5")
 	}
 }
 
@@ -180,5 +198,23 @@ func TestEditor_Resize_AdjustsHeights(t *testing.T) {
 	m3 := m3Any.(model)
 	if m3.ta.Height() < 3 || m3.vp.Height <= 0 {
 		t.Fatalf("expected positive heights for editor textarea and viewport; got ta=%d vp=%d", m3.ta.Height(), m3.vp.Height)
+	}
+}
+
+func TestEditor_Resize_TinyTerminalStillValid(t *testing.T) {
+	m := newTestModel()
+	m.authState = auth.AuthStateCompleted
+	// Enter editor
+	m.ta.SetValue("edit")
+	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := m2Any.(model)
+	// Send very small resize
+	m3Any, _ := m2.Update(tea.WindowSizeMsg{Width: 20, Height: 6})
+	m3 := m3Any.(model)
+	if m3.ta.Height() < minEditorHeight {
+		t.Fatalf("textarea height below minEditorHeight: %d", m3.ta.Height())
+	}
+	if m3.vp.Height < minViewportHeight {
+		t.Fatalf("viewport height below minViewportHeight: %d", m3.vp.Height)
 	}
 }

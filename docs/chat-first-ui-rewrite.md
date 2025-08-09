@@ -84,7 +84,7 @@ See the detailed spec and tests: `docs/specs/step-5-single-line-kql.md`.
 
 ### Step 6 — Multi-line KQL editor mode
 - Command `edit` toggles textarea to multi-line mode (higher height, InsertNewline enabled).
-- Ctrl+Enter submits the query; Esc cancels editor mode and returns to single-line mode.
+- Ctrl+Enter submits the query (portable alternatives: F5 or Ctrl+R); Esc cancels editor mode and returns to single-line mode.
 
 Usage and behavior (implemented):
 - Enter `edit` in chat and press Enter to open the editor. Prompt switches to `KQL> `.
@@ -92,8 +92,8 @@ Usage and behavior (implemented):
   - Enter inserts a newline
   - Ctrl+Enter submits (Ctrl+M in some terminals)
   - Esc cancels and returns to chat
-- On submit, the first line of the query is echoed with an ellipsis and the query runs.
-- After completion, a summary and table snapshot are added to the scrollback with a hint to press Enter to open results interactively.
+- On submit, the first line of the query is echoed with an ellipsis and the query runs while staying in editor mode.
+- After completion, a summary and table snapshot are added to the scrollback with a hint to press Esc to exit editor, then Enter to open results interactively.
 - Resize dynamically balances the viewport (top) and editor (bottom) heights.
 
 ## Command summary (initial set)

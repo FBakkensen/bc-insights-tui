@@ -35,8 +35,8 @@ Authoritative docs checked on: Bubble Tea v1.3.x and Bubbles v0.21.x.
    - Textarea height increases (e.g., to 8–10 rows within available space).
    - InsertNewline is enabled; prompt indicates editor state (e.g., `KQL> `) and a helper hint appears: “Ctrl+Enter to run · Esc to cancel”.
    - Focus remains in the textarea.
-3) User writes a multi-line KQL (Enter inserts newline) and presses Ctrl+Enter to submit.
-4) Program exits editor mode, echoes the submitted KQL (first line + …), appends “Running…” and follows Step 5’s pipeline:
+3) User writes a multi-line KQL (Enter inserts newline) and presses Ctrl+Enter (or F5/Ctrl+R) to submit.
+4) Program stays in editor mode, echoes the submitted KQL (first line + …), appends “Running…” and follows Step 5’s pipeline:
    - Validate → Execute → Append summary + snapshot → Offer “Press Enter to open interactively.”
 5) If the user presses Esc while editing, the app exits editor mode, discards the draft (not executed), and appends “Canceled edit.” to the scrollback.
 
@@ -71,7 +71,7 @@ Execution
 - Reuse Step 5: timeout via `config.QueryTimeoutSeconds`; call `ExecuteQuery(ctx, query)`.
 
 Output (success)
-- Append summary + snapshot; provide “Press Enter to open interactively.”
+- Append summary + snapshot; if in editor mode, provide “Press Esc to exit editor, then Enter to open interactively.” Otherwise: “Press Enter to open interactively.”
 
 Output (cancel)
 - Append “Canceled edit.” and return to chat mode; no execution.
@@ -95,9 +95,9 @@ Logging (per logging guidelines)
 - Chat `edit` command → transition to `modeKQLEditor`.
 - While in editor mode:
   - `tea.KeyMsg{Type: tea.KeyEsc}` → cancel edit.
-  - `submitEditorMsg` (from key binding matching Ctrl+Enter) → attempt submit:
+   - `submitEditorMsg` (from key binding matching Ctrl+Enter/Ctrl+M/F5/Ctrl+R) → attempt submit:
     - If buffer trimmed is empty → error message and remain in editor mode.
-    - Else leave editor mode, echo, append “Running…”, dispatch KQL command (as in Step 5) → `kqlResultMsg` updates.
+      - Else remain in editor mode, echo, append “Running…”, dispatch KQL command (as in Step 5) → `kqlResultMsg` updates.
 
 ## Edge cases and handling
 
@@ -140,7 +140,7 @@ Integration-style (with fakes)
 
 Notes
 - Do not assert exact ANSI; assert presence of hint text, mode transitions, and content mutations.
-- For Ctrl+Enter, tests should simulate `submitEditorMsg` directly to avoid terminal differences.
+- For Ctrl+Enter, tests should simulate `submitEditorMsg` directly to avoid terminal differences. Also include a reliable key like Ctrl+R in tests.
 
 ## Implementation checklist (dev tasks)
 
