@@ -2,11 +2,13 @@ package main
 
 // Entry point for bc-insights-tui
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +71,22 @@ func main() {
 func runNonInteractiveCommand(command string, cfg config.Config) error {
 	logging.Info("Running non-interactive command", "command", command)
 
+	// Support "logs" command with optional line count: logs or logs:N
+	if strings.HasPrefix(command, "logs") {
+		lines := 200
+		if idx := strings.Index(command, ":"); idx != -1 {
+			countStr := strings.TrimSpace(command[idx+1:])
+			if countStr != "" {
+				if v, err := strconv.Atoi(countStr); err != nil || v <= 0 {
+					return fmt.Errorf("invalid logs line count: %q; use a positive integer (e.g., -run=logs:200)", countStr)
+				} else {
+					lines = v
+				}
+			}
+		}
+		return tailLatestLogFileNonInteractive(lines)
+	}
+
 	switch command {
 	case "subs":
 		return listSubscriptionsNonInteractive(cfg)
@@ -85,8 +103,113 @@ func runNonInteractiveCommand(command string, cfg config.Config) error {
 	case "config-path":
 		return showConfigPathNonInteractive()
 	default:
-		return fmt.Errorf("unknown command: %s. Available commands: subs, login, resources, config, config-save, config-reset, config-path", command)
+		return fmt.Errorf("unknown command: %s. Available commands: subs, login, resources, config, config-save, config-reset, config-path, logs[:N]", command)
 	}
+}
+
+// tailLatestLogFileNonInteractive prints the last N lines of the newest log file in logs/.
+func tailLatestLogFileNonInteractive(lines int) error {
+	logging.Info("Tailing latest log file", "lines", fmt.Sprintf("%d", lines))
+
+	logsDir := "logs"
+	path, err := latestLogFilePath(logsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("No logs directory found. Start the app once to generate logs.")
+			return nil
+		}
+		return err
+	}
+	if path == "" {
+		fmt.Println("No log files found.")
+		return nil
+	}
+
+	// Print header
+	fmt.Printf("==> %s (last %d lines)\n", path, lines)
+	printed, err := tailFileLines(path, lines)
+	if err != nil {
+		return err
+	}
+	logging.Info("Completed tail of latest log file", "file", path, "linesPrinted", fmt.Sprintf("%d", printed))
+	return nil
+}
+
+// latestLogFilePath returns the full path of the newest bc-insights-tui-YYYY-MM-DD.log file in the given directory.
+func latestLogFilePath(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+
+	var latestName string
+	var latestTime time.Time
+	for _, de := range entries {
+		if de.IsDir() {
+			continue
+		}
+		name := de.Name()
+		if !strings.HasPrefix(name, "bc-insights-tui-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		info, infoErr := de.Info()
+		if infoErr != nil {
+			continue
+		}
+		if latestName == "" || info.ModTime().After(latestTime) {
+			latestName = name
+			latestTime = info.ModTime()
+		}
+	}
+
+	if latestName == "" {
+		return "", nil
+	}
+	return filepath.Join(dir, latestName), nil
+}
+
+// tailFileLines prints the last N lines from the provided file path and returns the number of lines printed.
+func tailFileLines(path string, lines int) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		logging.Error("Failed to open log file", "file", path, "error", err.Error())
+		return 0, fmt.Errorf("failed to open log file %s: %w", path, err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	// Increase the scanner buffer to handle long lines
+	const maxCapacity = 1024 * 1024 // 1 MiB
+	scanner.Buffer(make([]byte, 64*1024), maxCapacity)
+
+	// Ring buffer of last N lines
+	buf := make([]string, 0, lines)
+	idx := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(buf) < lines {
+			buf = append(buf, line)
+		} else {
+			buf[idx] = line
+			idx = (idx + 1) % lines
+		}
+	}
+	if scanErr := scanner.Err(); scanErr != nil {
+		logging.Warn("Scanner error while reading log file", "file", path, "error", scanErr.Error())
+	}
+
+	// Output
+	if len(buf) < lines {
+		for _, l := range buf {
+			fmt.Println(l)
+		}
+		return len(buf), nil
+	}
+	for i := 0; i < len(buf); i++ {
+		j := (idx + i) % len(buf)
+		fmt.Println(buf[j])
+	}
+	return len(buf), nil
 }
 
 // listSubscriptionsNonInteractive lists Azure subscriptions without TUI

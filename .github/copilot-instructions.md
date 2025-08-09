@@ -16,12 +16,13 @@ Architecture (big picture)
   - `config/`: precedence = defaults → JSON file (`config.json` or user home) → env (BCINSIGHTS_*) → flags. Provides `ValidateAndUpdateSetting`, `ListAllSettings` for `set/get` commands.
   - `auth/`: Azure OAuth2 Device Flow. Key APIs: `InitiateDeviceFlow`, `PollForToken`, `SaveTokenSecurely` (go-keyring), `GetValidToken`/`RefreshTokenIfNeeded`.
   - `appinsights/`: `ExecuteQuery(ctx, kql)` posts to `https://api.applicationinsights.io/v1/apps/{appId}/query`; returns tables with dynamic `Columns` and `Rows`. `ValidateQuery` does lightweight checks.
-  - `logging/`: logs to `logs/bc-insights-tui-YYYY-MM-DD.log`. Set `BC_INSIGHTS_LOG_LEVEL=DEBUG` to mirror to stdout.
+  - `logging/`: logs to `logs/bc-insights-tui-YYYY-MM-DD.log`. To mirror logs to stdout, set `BC_INSIGHTS_LOG_TO_STDOUT=true` (opt-in).
 
 Workflows that matter
 - Build/test/lint: `make build`, `make test`, `make race`, `make lint`, `make all` (CI-equivalent). UI-specific targets: `make ui-test` (when UI exists).
 - Run (Windows): `./bc-insights-tui.exe`. It currently prints a Step 0 placeholder.
 - **Non-interactive mode: `./bc-insights-tui.exe -run=COMMAND` for testing/automation without TUI. Commands: `subs` (list subscriptions), `login` (device flow auth). MANDATORY for AI agents - never run interactive mode as it hangs waiting for keyboard input.**
+  - Extra: `-run=logs[:N]` prints the last N lines from the latest log file (default N=200) without enabling stdout mirroring.
 - Config examples (env): `LOG_FETCH_SIZE`, `BCINSIGHTS_ENVIRONMENT`, `BCINSIGHTS_APP_INSIGHTS_ID`, OAuth: `BCINSIGHTS_OAUTH2_TENANT_ID`, `BCINSIGHTS_OAUTH2_CLIENT_ID`, `BCINSIGHTS_OAUTH2_SCOPES`.
 
 UI conventions (chat-first)

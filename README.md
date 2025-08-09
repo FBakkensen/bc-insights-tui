@@ -109,6 +109,10 @@ Example (non-interactive invocations):
 
 # After selecting and saving config via non-interactive commands, you can run other commands similarly
 # e.g., future: ./bc-insights-tui.exe -run=kql:"traces | take 5"
+
+# Tail latest logs without touching stdout mirroring (useful for debugging)
+./bc-insights-tui.exe -run=logs        # last 200 lines
+./bc-insights-tui.exe -run=logs:500    # last 500 lines
 ```
 
 Never invoke ./bc-insights-tui (without -run) from automation or AI tooling.
@@ -165,8 +169,7 @@ To enable detailed debug logging while writing to a daily file under `logs/`:
 
 - Set environment variable `BC_INSIGHTS_LOG_LEVEL=DEBUG` before starting the app.
 - Logs are written to `logs/bc-insights-tui-YYYY-MM-DD.log`.
-- By default, logs are not mirrored to the terminal to avoid interfering with the TUI.
-- Optional: To mirror logs to stdout (for local troubleshooting only), set `BC_INSIGHTS_LOG_TO_STDOUT=true`.
+- Logs are not printed to stdout by default. To mirror logs to stdout, explicitly set `BC_INSIGHTS_LOG_TO_STDOUT=true` (opt-in).
 - KQL execution logs preflight, request timing, HTTP status codes, and response metadata (request IDs). Secrets and the full query text are not logged.
 
 ## 🔍 Business Central Telemetry Context

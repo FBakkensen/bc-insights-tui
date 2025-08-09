@@ -465,14 +465,21 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 			}
 			return kqlResultMsg{duration: dur, err: mapped}
 		}
-		// Parse results
+		// Parse results; prefer PrimaryResult if available
 		tableName := ""
 		var cols []appinsights.Column
 		var rows [][]interface{}
 		if resp != nil && len(resp.Tables) > 0 {
-			tableName = resp.Tables[0].Name
-			cols = resp.Tables[0].Columns
-			rows = resp.Tables[0].Rows
+			idx := 0
+			for i, t := range resp.Tables {
+				if strings.EqualFold(t.Name, "PrimaryResult") {
+					idx = i
+					break
+				}
+			}
+			tableName = resp.Tables[idx].Name
+			cols = resp.Tables[idx].Columns
+			rows = resp.Tables[idx].Rows
 		}
 		logging.Info("KQL execute success",
 			"duration_ms", fmt.Sprintf("%d", dur.Milliseconds()),
@@ -488,11 +495,11 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 func (m *model) preflightKQL(appID string) error {
 	if m.authenticator == nil || !m.authenticator.HasValidToken() {
 		logging.Error("KQL preflight auth check failed", "hasAuthenticator", fmt.Sprintf("%v", m.authenticator != nil))
-		return fmt.Errorf("authentication required. run 'login' and try again")
+		return fmt.Errorf("authentication required. run 'login' to complete device code sign-in. likely cause: expired or missing token. next: verify you can access Application Insights in the Azure portal: https://portal.azure.com")
 	}
 	if strings.TrimSpace(appID) == "" {
 		logging.Error("KQL preflight appId check failed")
-		return fmt.Errorf("application insights app id is not set. run 'config set applicationInsightsAppId=<id>'")
+		return fmt.Errorf("application insights app id is not set. run: config set applicationInsightsAppId=<id>. next: find the App ID under your Application Insights resource in Azure portal (Overview > Application ID) or browse resources: https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/microsoft.insights%%2Fcomponents")
 	}
 	logging.Debug("KQL preflight ok")
 	return nil
@@ -516,16 +523,19 @@ func mapKQLError(err error, timeoutSec int, ctxErr error) error {
 	lower := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized"):
-		return fmt.Errorf("unauthorized (401). verify app insights permissions and tenant; try 'login' again")
+		return fmt.Errorf("unauthorized (401). likely cause: token scope/tenant mismatch or missing access. next: try 'login' again and confirm access to the Application Insights resource in Azure portal: https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/microsoft.insights%%2Fcomponents")
 	case strings.Contains(lower, "403"):
-		return fmt.Errorf("forbidden (403). verify access to the application insights resource in this tenant")
+		return fmt.Errorf("forbidden (403). likely cause: insufficient RBAC. next: ensure you have Reader/Log Analytics Reader on the resource/workspace in Azure portal: https://portal.azure.com")
 	case strings.Contains(lower, "400") || strings.Contains(lower, "bad request"):
-		return fmt.Errorf("bad kql (400). check table names and syntax")
-	case strings.Contains(lower, "429") || strings.Contains(lower, "throttle"):
-		return fmt.Errorf("throttled (429). retry later or reduce result size (set fetchSize lower)")
+		return fmt.Errorf("bad kql (400). check table names and syntax. next: validate the query in the portal (Logs) or KQL docs: https://learn.microsoft.com/azure/azure-monitor/logs/get-started-queries")
+	case strings.Contains(lower, "429") || strings.Contains(lower, "throttle") || strings.Contains(lower, "too many requests"):
+		return fmt.Errorf("throttled (429). retry later or reduce result size (e.g., add '| take N'). consider narrowing the time range")
 	default:
 		if ctxErr == context.DeadlineExceeded {
 			return fmt.Errorf("query timed out after %ds. increase queryTimeoutSeconds or simplify the query", timeoutSec)
+		}
+		if ctxErr == context.Canceled {
+			return fmt.Errorf("query canceled. you can retry or simplify the query")
 		}
 		return err
 	}

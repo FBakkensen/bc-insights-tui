@@ -259,7 +259,10 @@ func (ac *AzureClient) listResourcesInSubscription(ctx context.Context, subscrip
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			logging.Error("Failed to list AI components page", "subscriptionId", subscriptionID, "error", err.Error())
-			return nil, fmt.Errorf("failed to list Application Insights components: %w", err)
+			return nil, fmt.Errorf(
+				"failed to list Application Insights components: %w. Likely causes: insufficient RBAC on subscription '%s' or network/proxy blocking ARM. Next steps: verify access in Azure Portal Subscriptions (https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBlade), ensure a role like 'Monitoring Reader', and check corporate proxy settings",
+				err, subscriptionID,
+			)
 		}
 
 		logging.Debug("Received AI components page", "subscriptionId", subscriptionID, "count", fmt.Sprintf("%d", len(page.Value)))
