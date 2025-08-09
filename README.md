@@ -194,6 +194,22 @@ Requirements:
 
 Errors are mapped to actionable hints (401/403/400/429, timeouts) and logs include a query hash, not the full text.
 
+### Multi-line KQL editor (Step 6)
+
+When you want to compose multi-line Kusto queries interactively:
+
+- Type `edit` in the chat input and press Enter to open the editor.
+- The prompt changes to `KQL> ` and the input becomes multi-line.
+- Keys while editing:
+  - Enter inserts a newline
+  - Ctrl+Enter submits the query (Ctrl+M in some terminals)
+  - Esc cancels and returns to chat
+- On submit, the first line is echoed with an ellipsis and the query runs.
+- After results complete, you’ll see a summary, a compact table snapshot, and a hint: “Press Enter to open interactively.”
+- Resize dynamically adjusts the editor and output panel heights.
+
+Tip: For quick one-liners, keep using `kql: ...`. For anything longer or pipelined, use `edit`.
+
 ### Debug logs
 
 To enable detailed debug logging while writing to a daily file under `logs/`:
