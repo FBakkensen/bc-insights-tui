@@ -17,6 +17,7 @@ import (
 	"github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 	"github.com/FBakkensen/bc-insights-tui/tui"
+	"github.com/joho/godotenv"
 	keyring "github.com/zalando/go-keyring"
 )
 
@@ -24,6 +25,12 @@ func main() {
 	// Parse command line flags
 	runCmd := flag.String("run", "", "Run a command non-interactively (e.g., 'subs', 'login')")
 	flag.Parse()
+
+	// Load .env early so env vars affect logging level and config
+	envLoaded := false
+	if err := godotenv.Load(); err == nil {
+		envLoaded = true
+	}
 
 	// Initialize logging first (allow override via env)
 	logLevel := logging.LevelInfo
@@ -45,6 +52,9 @@ func main() {
 	defer logging.Close()
 
 	logging.Info("Starting bc-insights-tui application (chat-first rewrite - Step 1)")
+	if envLoaded {
+		logging.Info("dotenv loaded", "file", ".env")
+	}
 
 	// Load configuration
 	cfg := config.LoadConfig()

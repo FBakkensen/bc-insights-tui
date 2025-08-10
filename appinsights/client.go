@@ -14,7 +14,19 @@ import (
 
 	"golang.org/x/oauth2"
 
+	cfgpkg "github.com/FBakkensen/bc-insights-tui/config"
+	"github.com/FBakkensen/bc-insights-tui/debugdump"
+	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
+)
+
+// Track last-seen raw capture settings to log changes once per process
+var (
+	rawCfgMu        sync.Mutex
+	rawCfgInit      bool
+	lastRawEnabled  bool
+	lastRawPath     string
+	lastRawMaxBytes int
 )
 
 // ApplicationInsightsAuthenticator represents an interface for acquiring Application Insights API tokens
@@ -102,18 +114,13 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	queryURL := fmt.Sprintf("%s/v1/apps/%s/query", c.baseURL, c.appID)
 
 	// Log preflight details (redact query text; include hash-length only)
-	deadline, hasDeadline := ctx.Deadline()
+	timeoutSet, deadlineStr := computeDeadlineFields(ctx)
 	logging.Debug("KQL preflight",
 		"url", queryURL,
 		"appId_len", fmt.Sprintf("%d", len(strings.TrimSpace(c.appID))),
 		"body_bytes", fmt.Sprintf("%d", len(bodyJSON)),
-		"timeout_set", fmt.Sprintf("%v", hasDeadline),
-		"deadline", func() string {
-			if hasDeadline {
-				return deadline.Format(time.RFC3339)
-			}
-			return ""
-		}(),
+		"timeout_set", timeoutSet,
+		"deadline", deadlineStr,
 	)
 
 	// Create HTTP request
@@ -127,6 +134,15 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
+	// Prepare optional raw debug capture
+	rawEnabled, resolvedPath, maxBytes := getRawCaptureConfig()
+	checkAndLogRawConfigChange(rawEnabled, resolvedPath, maxBytes)
+
+	// If enabled, write request-only capture first
+	if rawEnabled {
+		writeRawRequestCapture(req, bodyJSON, maxBytes, resolvedPath)
+	}
+
 	// Execute request
 	start := time.Now()
 	logging.Debug("KQL request sending")
@@ -138,6 +154,10 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 			sel = ctx.Err().Error()
 		}
 		logging.Error("KQL request failed", "error", err.Error(), "ctxErr", sel)
+		// Write error-only capture if enabled
+		if rawEnabled {
+			writeRawTransportError(req, bodyJSON, maxBytes, resolvedPath, err, time.Since(start))
+		}
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
 	defer resp.Body.Close()
@@ -162,6 +182,10 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 			"x-ms-correlation-request-id", cid,
 			"resp_bytes", fmt.Sprintf("%d", len(body)),
 		)
+		// Write full capture if enabled
+		if rawEnabled {
+			writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, fmt.Sprintf("API request failed with status %d", resp.StatusCode))
+		}
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -187,12 +211,183 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 		"duration_ms", fmt.Sprintf("%d", dur.Milliseconds()),
 		"rows", fmt.Sprintf("%d", rowCount),
 		"cols", fmt.Sprintf("%d", colCount),
-		"table", firstNonEmpty(tableName, "PrimaryResult"),
+		"table", util.FirstNonEmpty(tableName, "PrimaryResult"),
 		"x-ms-request-id", rid,
 		"x-ms-correlation-request-id", cid,
 	)
 
+	// Write success capture if enabled
+	if rawEnabled {
+		writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, "")
+	}
+
 	return &queryResp, nil
+}
+
+// computeDeadlineFields returns (timeout_set, deadline) strings for logging.
+func computeDeadlineFields(ctx context.Context) (string, string) {
+	if d, ok := ctx.Deadline(); ok {
+		return "true", d.Format(time.RFC3339)
+	}
+	return "false", ""
+}
+
+// getRawCaptureConfig reads config/env to determine raw capture enablement and resolves path.
+func getRawCaptureConfig() (bool, string, int) {
+	cfg := cfgpkg.LoadConfigWithArgs(nil)
+	if !cfg.DebugAppInsightsRawEnable {
+		return false, "", cfg.DebugAppInsightsRawMaxBytes
+	}
+	resolvedPath, rerr := debugdump.ResolvePath(cfg.DebugAppInsightsRawFile)
+	if rerr != nil {
+		logging.Warn("AI raw path resolution failed", "error", rerr.Error())
+		return false, "", cfg.DebugAppInsightsRawMaxBytes
+	}
+	return true, resolvedPath, cfg.DebugAppInsightsRawMaxBytes
+}
+
+// checkAndLogRawConfigChange logs when the raw capture settings change (old -> new) once per process run.
+func checkAndLogRawConfigChange(enabled bool, path string, maxBytes int) {
+	rawCfgMu.Lock()
+	defer rawCfgMu.Unlock()
+	if !rawCfgInit {
+		// Initialize without logging
+		rawCfgInit = true
+		lastRawEnabled = enabled
+		lastRawPath = path
+		lastRawMaxBytes = maxBytes
+		return
+	}
+	changed := false
+	enabledOld := lastRawEnabled
+	pathOld := lastRawPath
+	maxBytesOld := lastRawMaxBytes
+	if enabled != lastRawEnabled {
+		changed = true
+		lastRawEnabled = enabled
+	}
+	if strings.TrimSpace(path) != strings.TrimSpace(lastRawPath) {
+		changed = true
+		lastRawPath = path
+	}
+	if maxBytes != lastRawMaxBytes {
+		changed = true
+		lastRawMaxBytes = maxBytes
+	}
+	if changed {
+		logging.Info("ai_raw_dump_settings_changed",
+			"enabled_old", fmt.Sprintf("%t", enabledOld),
+			"enabled_new", fmt.Sprintf("%t", enabled),
+			"path_old", pathOld,
+			"path_new", path,
+			"max_bytes_old", fmt.Sprintf("%d", maxBytesOld),
+			"max_bytes_new", fmt.Sprintf("%d", maxBytes),
+		)
+	}
+}
+
+// writeRawRequestCapture writes the initial request-only capture and logs a start event.
+func writeRawRequestCapture(req *http.Request, bodyJSON []byte, maxBytes int, path string) {
+	hdrs := map[string]string{
+		"content-type":  req.Header.Get("Content-Type"),
+		"authorization": req.Header.Get("Authorization"),
+	}
+	red := debugdump.RedactHeaders(hdrs)
+	// Pretty print request body JSON
+	bodyStr, bodyLen, truncated := debugdump.FormatBodyPrettyJSON(bodyJSON, maxBytes)
+	cap := debugdump.AIRawCapture{
+		Version:    1,
+		CapturedAt: debugdump.Now(),
+		Request: debugdump.AIRawRequest{
+			StartedAt: debugdump.Now(),
+			Method:    req.Method,
+			URL:       req.URL.String(),
+			Headers:   red,
+			Body:      bodyStr,
+			BodyBytes: bodyLen,
+			Truncated: truncated,
+		},
+		Response: nil,
+		Error:    nil,
+	}
+	if werr := debugdump.WriteAIRawRequest(path, cap); werr != nil {
+		logging.Warn("AI raw dump request write failed", "error", werr.Error())
+		return
+	}
+	logging.Info("ai_raw_dump_started", "path", path, "body_bytes", fmt.Sprintf("%d", bodyLen))
+}
+
+// writeRawTransportError writes a full capture with request details and error message.
+func writeRawTransportError(req *http.Request, bodyJSON []byte, maxBytes int, path string, err error, dur time.Duration) {
+	reqHdr := debugdump.RedactHeaders(map[string]string{
+		"content-type":  req.Header.Get("Content-Type"),
+		"authorization": req.Header.Get("Authorization"),
+	})
+	reqBodyStr, reqBodyLen, reqTrunc := debugdump.FormatBodyPrettyJSON(bodyJSON, maxBytes)
+	cap := debugdump.AIRawCapture{
+		Version:    1,
+		CapturedAt: debugdump.Now(),
+		Request: debugdump.AIRawRequest{
+			StartedAt: "",
+			Method:    req.Method,
+			URL:       req.URL.String(),
+			Headers:   reqHdr,
+			Body:      reqBodyStr,
+			BodyBytes: reqBodyLen,
+			Truncated: reqTrunc,
+		},
+		Response: nil,
+		Error:    &debugdump.AIRawError{Message: err.Error()},
+	}
+	if werr := debugdump.WriteAIRawFull(path, cap); werr != nil {
+		logging.Warn("AI raw dump error write failed", "error", werr.Error())
+		return
+	}
+	logging.Info("ai_raw_dump_written", "path", path, "status", "n/a", "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", "0")
+}
+
+// writeRawHTTPResult writes a full capture for HTTP responses, optionally including an error message.
+func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response, respBody []byte, maxBytes int, path string, dur time.Duration, errMsg string) {
+	rh := map[string]string{
+		"x-ms-request-id":             resp.Header.Get("x-ms-request-id"),
+		"x-ms-correlation-request-id": resp.Header.Get("x-ms-correlation-request-id"),
+		"content-type":                resp.Header.Get("Content-Type"),
+	}
+	redh := debugdump.RedactHeaders(rh)
+	// Pretty print response body JSON when possible
+	bodyStr, bodyLen, truncated := debugdump.FormatBodyPrettyJSON(respBody, maxBytes)
+	// Pretty print request body JSON and apply the same truncation policy for symmetry
+	reqBodyStr, reqBodyLen, reqTrunc := debugdump.FormatBodyPrettyJSON(bodyJSON, maxBytes)
+	full := debugdump.AIRawFullCapture{
+		Version:    1,
+		CapturedAt: debugdump.Now(),
+		Request: debugdump.AIRawRequest{
+			StartedAt: "",
+			Method:    req.Method,
+			URL:       req.URL.String(),
+			Headers:   debugdump.RedactHeaders(map[string]string{"content-type": req.Header.Get("Content-Type"), "authorization": req.Header.Get("Authorization")}),
+			Body:      reqBodyStr,
+			BodyBytes: reqBodyLen,
+			Truncated: reqTrunc,
+		},
+		Response: &debugdump.AIRawResponse{
+			CompletedAt: debugdump.Now(),
+			Status:      resp.StatusCode,
+			DurationMs:  dur.Milliseconds(),
+			Headers:     redh,
+			Body:        bodyStr,
+			BodyBytes:   bodyLen,
+			Truncated:   truncated,
+		},
+	}
+	if strings.TrimSpace(errMsg) != "" {
+		full.Error = &debugdump.AIRawError{Message: errMsg}
+	}
+	if werr := debugdump.WriteAIRawFull(path, full); werr != nil {
+		logging.Warn("AI raw dump full write failed", "error", werr.Error())
+		return
+	}
+	logging.Info("ai_raw_dump_written", "path", path, "status", fmt.Sprintf("%d", resp.StatusCode), "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", fmt.Sprintf("%d", bodyLen))
 }
 
 // getValidToken returns a valid token, acquiring one via authenticator if needed
@@ -255,12 +450,7 @@ func (c *Client) ValidateQuery(query string) error {
 }
 
 // firstNonEmpty returns v if not blank; otherwise fallback.
-func firstNonEmpty(v, fallback string) string {
-	if strings.TrimSpace(v) == "" {
-		return fallback
-	}
-	return v
-}
+// firstNonEmpty was moved to internal/util. Use util.FirstNonEmpty instead.
 
 // containsValidTable checks if the query starts with a known table
 func (c *Client) containsValidTable(query string) bool {

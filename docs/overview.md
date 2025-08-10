@@ -98,14 +98,14 @@ Development will proceed in phases to ensure a solid foundation and iterative pr
     * [x] Implement a simple view with a welcome message and help text.
     * [x] Implement basic configuration loading (e.g., for log fetch size).
 * **Phase 2: Authentication**
-    * [ ] Implement the OAuth2 Device Authorization Flow.
-    * [ ] Create a "Login" view in the TUI.
-    * [ ] Securely store and refresh authentication tokens.
-    * [ ] **Ensure all authentication errors are helpful and actionable.**
+    * [x] Implement the OAuth2 Device Authorization Flow.
+    * [x] Create a "Login" view in the TUI.
+    * [x] Securely store and refresh authentication tokens.
+    * [x] **Ensure all authentication errors are helpful and actionable.**
 * **Phase 3: Application Insights Integration**
-    * [ ] Create the `appinsights` client to make authenticated API calls.
-    * [ ] Implement a function to execute a basic KQL query that respects the configured fetch size.
-    * [ ] Create a view to display a list of log entries with default columns.
+    * [x] Create the `appinsights` client to make authenticated API calls.
+    * [x] Implement a function to execute a basic KQL query that respects the configured fetch size.
+    * [x] Create a view to display a list of log entries with default columns.
     * [ ] **Implement dynamic parsing of `customDimensions` based on `eventId` for the details view.**
     * [ ] Implement pagination logic to "load more" logs.
     * [ ] **Handle API errors and loading states with clear, guiding messages.**

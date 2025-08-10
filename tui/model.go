@@ -18,6 +18,7 @@ import (
 	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/config"
+	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
@@ -209,49 +210,37 @@ func (m *model) showConfig() {
 
 	// Group settings by category for better readability
 	m.append("  Basic Settings:")
-	if val, ok := settings["fetchSize"]; ok {
-		m.append("    Log Fetch Size: " + val)
-	}
-	if val, ok := settings["environment"]; ok {
-		m.append("    Environment: " + val)
-	}
+	m.appendSetting(settings, "fetchSize", "Log Fetch Size")
+	m.appendSetting(settings, "environment", "Environment")
 
 	m.append("  Application Insights:")
-	if val, ok := settings["applicationInsightsAppId"]; ok {
-		m.append("    App ID: " + val)
-	}
-	if val, ok := settings["applicationInsightsKey"]; ok {
-		m.append("    Key: " + val)
-	}
+	m.appendSetting(settings, "applicationInsightsAppId", "App ID")
+	m.appendSetting(settings, "applicationInsightsKey", "Key")
 
 	m.append("  Azure:")
-	if val, ok := settings["azure.subscriptionId"]; ok {
-		m.append("    Subscription ID: " + val)
-	}
+	m.appendSetting(settings, "azure.subscriptionId", "Subscription ID")
 
 	m.append("  OAuth2:")
-	if val, ok := settings["oauth2.tenantId"]; ok {
-		m.append("    Tenant ID: " + val)
-	}
-	if val, ok := settings["oauth2.clientId"]; ok {
-		m.append("    Client ID: " + val)
-	}
-	if val, ok := settings["oauth2.scopes"]; ok {
-		m.append("    Scopes: " + val)
-	}
+	m.appendSetting(settings, "oauth2.tenantId", "Tenant ID")
+	m.appendSetting(settings, "oauth2.clientId", "Client ID")
+	m.appendSetting(settings, "oauth2.scopes", "Scopes")
 
 	m.append("  Query Settings:")
-	if val, ok := settings["queryHistoryMaxEntries"]; ok {
-		m.append("    Max History Entries: " + val)
-	}
-	if val, ok := settings["queryTimeoutSeconds"]; ok {
-		m.append("    Query Timeout (seconds): " + val)
-	}
-	if val, ok := settings["queryHistoryFile"]; ok {
-		m.append("    History File: " + val)
-	}
-	if val, ok := settings["editorPanelRatio"]; ok {
-		m.append("    Editor Panel Ratio: " + val)
+	m.appendSetting(settings, "queryHistoryMaxEntries", "Max History Entries")
+	m.appendSetting(settings, "queryTimeoutSeconds", "Query Timeout (seconds)")
+	m.appendSetting(settings, "queryHistoryFile", "History File")
+	m.appendSetting(settings, "editorPanelRatio", "Editor Panel Ratio")
+
+	m.append("  Debug / Raw Capture:")
+	m.appendSetting(settings, "debug.appInsightsRawEnable", "Enabled")
+	m.appendSetting(settings, "debug.appInsightsRawFile", "File")
+	m.appendSetting(settings, "debug.appInsightsRawMaxBytes", "Max Bytes")
+}
+
+// appendSetting appends a formatted key/value if the key exists.
+func (m *model) appendSetting(settings map[string]string, key, label string) {
+	if val, ok := settings[key]; ok {
+		m.append("    " + label + ": " + val)
 	}
 }
 
@@ -261,7 +250,7 @@ func (m *model) showKeys() {
 	m.append("  Global:")
 	// spacing aligned for readability
 	m.append("    Esc / Ctrl+C    — Quit (or close panel)")
-	m.append("    F6              — Open last results interactively")
+	m.append("    F6              — Open last results interactively (in Chat/Editor)")
 	m.append("  Chat mode:")
 	m.append("    Enter            — Submit command (e.g., 'edit', 'subs', 'resources', 'config')")
 	m.append("  Editor mode:")
@@ -538,7 +527,7 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 			"duration_ms", fmt.Sprintf("%d", dur.Milliseconds()),
 			"rows", fmt.Sprintf("%d", len(rows)),
 			"cols", fmt.Sprintf("%d", len(cols)),
-			"table", firstNonEmpty(tableName, "PrimaryResult"),
+			"table", util.FirstNonEmpty(tableName, "PrimaryResult"),
 		)
 		return kqlResultMsg{tableName: tableName, columns: cols, rows: rows, duration: dur}
 	}
@@ -631,7 +620,7 @@ func (m *model) openTableFromLastResults() (model, tea.Cmd) {
 		"action", "open_interactive",
 		"rowCount", fmt.Sprintf("%d", len(m.lastRows)),
 		"columnCount", fmt.Sprintf("%d", len(m.lastColumns)),
-		"table", firstNonEmpty(m.lastTable, "PrimaryResult"),
+		"table", util.FirstNonEmpty(m.lastTable, "PrimaryResult"),
 		"fromMode", func() string {
 			switch m.returnMode {
 			case modeChat:

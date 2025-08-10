@@ -138,7 +138,7 @@ Non-interactive commands (use with `-run=`):
 - `-run=keyring-test` – Write/read/delete a temporary keyring credential to validate access
 - `-run=logs[:N]` – Tail last N lines from the latest log file (default 200)
 
-Tip: for detailed auth notes and troubleshooting, see `docs/authentication.md`.
+Tip: for auth flow and troubleshooting, see `docs/overview.md` and the non-interactive diagnostics commands (`-run=login-status`, `-run=keyring-info`, `-run=keyring-test`).
 
 ### Configuration
 
@@ -160,7 +160,7 @@ $env:BCINSIGHTS_KEYRING_SERVICE = "bc-insights-tui"
 $env:BCINSIGHTS_KEYRING_NAMESPACE = "dev"
 ```
 
-See docs/authentication.md for details on the OAuth2 device flow, token storage, and troubleshooting frequent sign-ins.
+See `docs/overview.md` for the current architecture and non-interactive commands for OAuth2 login, token storage checks, and troubleshooting frequent sign-ins.
 
 ## 🎮 Usage
 
@@ -218,6 +218,18 @@ To enable detailed debug logging while writing to a daily file under `logs/`:
 - Logs are written to `logs/bc-insights-tui-YYYY-MM-DD.log`.
 - Logs are not printed to stdout by default. To mirror logs to stdout, explicitly set `BC_INSIGHTS_LOG_TO_STDOUT=true` (opt-in).
 - KQL execution logs preflight, request timing, HTTP status codes, and response metadata (request IDs). Secrets and the full query text are not logged.
+
+### App Insights raw capture (advanced)
+
+You can optionally capture the last KQL HTTP request/response to a YAML file for deep diagnostics. It’s disabled by default.
+
+- Enable: set `BCINSIGHTS_AI_RAW_ENABLE=true`
+- Path: override with `BCINSIGHTS_AI_RAW_FILE` (default `logs/appinsights-raw.yaml`)
+- Size cap: set `BCINSIGHTS_AI_RAW_MAX_BYTES` per body (default 1048576; 0 = unlimited)
+
+Notes
+- The file is atomically overwritten for each request and may include your KQL text. Treat it as sensitive.
+- Daily logs record when the feature toggles or path changes, and when a capture is written.
 
 ## 🔍 Business Central Telemetry Context
 
