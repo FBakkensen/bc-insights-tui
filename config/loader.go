@@ -161,9 +161,21 @@ func (cl *ConfigLoader) loadConfigFromFile(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to read config file %s: %w", filename, err)
 	}
 
+	// Unmarshal into Config first
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file %s: %w", filename, err)
+	}
+
+	// Overlay for pointer-based booleans to allow explicit false
+	type fileOverlay struct {
+		DebugAppInsightsRawEnable *bool `json:"debug.appInsightsRawEnable"`
+	}
+	var ov fileOverlay
+	if err := json.Unmarshal(data, &ov); err == nil {
+		if ov.DebugAppInsightsRawEnable != nil {
+			cfg.DebugAppInsightsRawEnable = *ov.DebugAppInsightsRawEnable
+		}
 	}
 
 	return &cfg, nil

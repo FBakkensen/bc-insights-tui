@@ -141,10 +141,12 @@ func ResolvePath(in string) (string, error) {
 			p = filepath.Join("logs", p)
 		}
 	}
-	// Ensure .yaml extension (per spec)
-	if ext := strings.ToLower(filepath.Ext(p)); ext == "" || (ext != ".yaml" && ext != ".yml") {
+	// If no extension, default to .yaml. If extension is present (even if non-yaml), keep as provided.
+	if ext := strings.ToLower(filepath.Ext(p)); ext == "" {
 		p = p + ".yaml"
 	}
+	// Normalize to OS-specific separators and clean up any ./ segments.
+	p = filepath.Clean(filepath.FromSlash(p))
 	return p, nil
 }
 

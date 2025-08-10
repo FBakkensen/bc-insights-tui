@@ -3,6 +3,7 @@ package appinsights
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func TestAIRawCapture_Success(t *testing.T) {
 	tok := &oauth2.Token{AccessToken: "t", Expiry: time.Now().Add(time.Hour)}
 	c := NewClient(tok, "appId")
 	body := `{"tables": [{"name": "PrimaryResult", "columns": [], "rows": []}]}`
-	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "x-ms-request-id": {"rid"}, "x-ms-correlation-request-id": {"cid"}}, Body: ioNopCloser(strings.NewReader(body))}
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}, "x-ms-request-id": {"rid"}, "x-ms-correlation-request-id": {"cid"}}, Body: io.NopCloser(strings.NewReader(body))}
 	installFakeTransport(c, &fakeRoundTripper{resp: resp})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -120,14 +121,14 @@ func TestAIRawCapture_Truncation(t *testing.T) {
 	c := NewClient(tok, "appId")
 	// 30 bytes body to force truncation
 	long := strings.Repeat("x", 30)
-	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioNopCloser(strings.NewReader(long))}
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(long))}
 	installFakeTransport(c, &fakeRoundTripper{resp: resp})
 
 	if _, err := c.ExecuteQuery(context.Background(), "traces | limit 1"); err == nil {
 		t.Fatalf("expected parse error for invalid JSON body")
 	}
 	// Use non-200 to still write capture with body present
-	resp = &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioNopCloser(strings.NewReader(long))}
+	resp = &http.Response{StatusCode: 400, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(long))}
 	installFakeTransport(c, &fakeRoundTripper{resp: resp})
 	_, _ = c.ExecuteQuery(context.Background(), "traces | limit 1")
 
@@ -149,7 +150,7 @@ func TestAIRawCapture_Disabled_NoFile(t *testing.T) {
 	tok := &oauth2.Token{AccessToken: "t", Expiry: time.Now().Add(time.Hour)}
 	c := NewClient(tok, "appId")
 	body := `{"tables": [{"name": "PrimaryResult", "columns": [], "rows": []}]}`
-	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioNopCloser(strings.NewReader(body))}
+	resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}
 	installFakeTransport(c, &fakeRoundTripper{resp: resp})
 	_, _ = c.ExecuteQuery(context.Background(), "traces | limit 1")
 
@@ -184,8 +185,8 @@ func TestAIRawCapture_Overwrite(t *testing.T) {
 	body1 := `{"tables": [{"name": "PrimaryResult", "columns": [], "rows": [[1]]}]}`
 	body2 := `{"tables": [{"name": "PrimaryResult", "columns": [], "rows": [[1],[2],[3]]}]}`
 	srt := &seqRoundTripper{resps: []*http.Response{
-		{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioNopCloser(strings.NewReader(body1))},
-		{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: ioNopCloser(strings.NewReader(body2))},
+		{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body1))},
+		{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body2))},
 	}}
 	installFakeTransport(c, srt)
 
@@ -202,11 +203,4 @@ func TestAIRawCapture_Overwrite(t *testing.T) {
 	}
 }
 
-// minimal io.NopCloser clone as local helper
-// Note: cannot use io.NopCloser(strings.NewReader(body)) due to generics issues on older Go in CI.
-
-type nopCloser struct{ r *strings.Reader }
-
-func (n nopCloser) Read(p []byte) (int, error) { return n.r.Read(p) }
-func (n nopCloser) Close() error               { return nil }
-func ioNopCloser(r *strings.Reader) nopCloser  { return nopCloser{r: r} }
+// Use standard library io.NopCloser (Go >= 1.20)

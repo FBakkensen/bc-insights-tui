@@ -11,6 +11,7 @@ import (
 
 	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
+	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
@@ -583,7 +584,7 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// Build snapshot
-	summary := fmt.Sprintf("Query complete in %.3fs · %d rows · table: %s", res.duration.Seconds(), len(res.rows), firstNonEmpty(res.tableName, "PrimaryResult"))
+	summary := fmt.Sprintf("Query complete in %.3fs · %d rows · table: %s", res.duration.Seconds(), len(res.rows), util.FirstNonEmpty(res.tableName, "PrimaryResult"))
 	m.append(summary)
 	snapshot := m.renderSnapshot(res.columns, res.rows)
 	if snapshot != "" {
@@ -713,12 +714,7 @@ func (m *model) initInteractiveTable() {
 	)
 }
 
-func firstNonEmpty(v, fallback string) string {
-	if strings.TrimSpace(v) == "" {
-		return fallback
-	}
-	return v
-}
+// firstNonEmpty moved to internal/util; use util.FirstNonEmpty
 
 func sprintAny(v interface{}) string {
 	switch t := v.(type) {

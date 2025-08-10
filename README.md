@@ -219,6 +219,18 @@ To enable detailed debug logging while writing to a daily file under `logs/`:
 - Logs are not printed to stdout by default. To mirror logs to stdout, explicitly set `BC_INSIGHTS_LOG_TO_STDOUT=true` (opt-in).
 - KQL execution logs preflight, request timing, HTTP status codes, and response metadata (request IDs). Secrets and the full query text are not logged.
 
+### App Insights raw capture (advanced)
+
+You can optionally capture the last KQL HTTP request/response to a YAML file for deep diagnostics. It’s disabled by default.
+
+- Enable: set `BCINSIGHTS_AI_RAW_ENABLE=true`
+- Path: override with `BCINSIGHTS_AI_RAW_FILE` (default `logs/appinsights-raw.yaml`)
+- Size cap: set `BCINSIGHTS_AI_RAW_MAX_BYTES` per body (default 1048576; 0 = unlimited)
+
+Notes
+- The file is atomically overwritten for each request and may include your KQL text. Treat it as sensitive.
+- Daily logs record when the feature toggles or path changes, and when a capture is written.
+
 ## 🔍 Business Central Telemetry Context
 
 This tool is specifically designed for Business Central telemetry data structure:

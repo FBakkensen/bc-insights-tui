@@ -16,6 +16,7 @@ import (
 
 	cfgpkg "github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/debugdump"
+	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
@@ -210,7 +211,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 		"duration_ms", fmt.Sprintf("%d", dur.Milliseconds()),
 		"rows", fmt.Sprintf("%d", rowCount),
 		"cols", fmt.Sprintf("%d", colCount),
-		"table", firstNonEmpty(tableName, "PrimaryResult"),
+		"table", util.FirstNonEmpty(tableName, "PrimaryResult"),
 		"x-ms-request-id", rid,
 		"x-ms-correlation-request-id", cid,
 	)
@@ -258,29 +259,30 @@ func checkAndLogRawConfigChange(enabled bool, path string, maxBytes int) {
 		return
 	}
 	changed := false
-	fields := []any{}
+	enabledOld := lastRawEnabled
+	pathOld := lastRawPath
+	maxBytesOld := lastRawMaxBytes
 	if enabled != lastRawEnabled {
 		changed = true
-		fields = append(fields, "enabled_old", fmt.Sprintf("%t", lastRawEnabled), "enabled_new", fmt.Sprintf("%t", enabled))
 		lastRawEnabled = enabled
 	}
 	if strings.TrimSpace(path) != strings.TrimSpace(lastRawPath) {
 		changed = true
-		fields = append(fields, "path_old", lastRawPath, "path_new", path)
 		lastRawPath = path
 	}
 	if maxBytes != lastRawMaxBytes {
 		changed = true
-		fields = append(fields, "max_bytes_old", fmt.Sprintf("%d", lastRawMaxBytes), "max_bytes_new", fmt.Sprintf("%d", maxBytes))
 		lastRawMaxBytes = maxBytes
 	}
 	if changed {
-		// convert []any to []string for logger
-		kv := make([]string, 0, len(fields))
-		for _, v := range fields {
-			kv = append(kv, fmt.Sprintf("%v", v))
-		}
-		logging.Info("ai_raw_dump_settings_changed", kv...)
+		logging.Info("ai_raw_dump_settings_changed",
+			"enabled_old", fmt.Sprintf("%t", enabledOld),
+			"enabled_new", fmt.Sprintf("%t", enabled),
+			"path_old", pathOld,
+			"path_new", path,
+			"max_bytes_old", fmt.Sprintf("%d", maxBytesOld),
+			"max_bytes_new", fmt.Sprintf("%d", maxBytes),
+		)
 	}
 }
 
@@ -446,12 +448,7 @@ func (c *Client) ValidateQuery(query string) error {
 }
 
 // firstNonEmpty returns v if not blank; otherwise fallback.
-func firstNonEmpty(v, fallback string) string {
-	if strings.TrimSpace(v) == "" {
-		return fallback
-	}
-	return v
-}
+// firstNonEmpty was moved to internal/util. Use util.FirstNonEmpty instead.
 
 // containsValidTable checks if the query starts with a known table
 func (c *Client) containsValidTable(query string) bool {
