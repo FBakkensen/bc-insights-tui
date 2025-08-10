@@ -120,7 +120,7 @@ func TestKQL_SnapshotAndOpenInteractively(t *testing.T) {
 		t.Fatalf("expected closed message; got: %q", m4.content)
 	}
 	// Verify returnMode was cleared
-	if m4.returnMode != 0 {
+	if m4.returnMode != modeUnknown {
 		t.Fatalf("expected returnMode to be cleared after close; got %v", m4.returnMode)
 	}
 }
@@ -169,5 +169,39 @@ func TestChatMode_F6_WithoutResults(t *testing.T) {
 	// Should show no results message
 	if !strings.Contains(m2.content, "No results to open.") {
 		t.Fatalf("expected no results message; got: %q", m2.content)
+	}
+}
+
+func TestTableMode_DelegatesNavAndPreservesReturn(t *testing.T) {
+	// Prepare a model with results and in chat mode
+	cols := []appinsights.Column{{Name: "A"}}
+	rows := [][]interface{}{{"1"}, {"2"}}
+	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
+	m.lastColumns = cols
+	m.lastRows = rows
+	m.lastTable = "T"
+	m.haveResults = true
+
+	// Open table via F6 from chat
+	m2Any, _ := m.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m2 := m2Any.(model)
+	if m2.mode != modeTableResults {
+		t.Fatalf("expected modeTableResults; got %v", m2.mode)
+	}
+	if m2.returnMode != modeChat {
+		t.Fatalf("expected returnMode=modeChat; got %v", m2.returnMode)
+	}
+
+	// Send a navigation key (Right); ensure it delegates to table without closing or changing mode
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m3 := m3Any.(model)
+	if m3.mode != modeTableResults {
+		t.Fatalf("expected to remain in modeTableResults; got %v", m3.mode)
+	}
+	if m3.returnMode != modeChat {
+		t.Fatalf("expected returnMode to be preserved; got %v", m3.returnMode)
+	}
+	if strings.Contains(m3.content, "Closed results table.") {
+		t.Fatalf("did not expect close message on navigation key")
 	}
 }

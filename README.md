@@ -186,7 +186,7 @@ You can run Application Insights Kusto queries directly from the chat input:
 
 - Type: `kql: <your KQL>` and press Enter.
 - The top panel shows a snapshot table with up to your configured fetch size and a summary line.
-- Press Enter on an empty input to open the results in an interactive table (use arrow keys to navigate, Esc to return).
+- Press F6 to open the results in an interactive table (use arrow keys to navigate, Esc to return).
 
 Requirements:
 - Be authenticated (`login`).
@@ -205,7 +205,7 @@ When you want to compose multi-line Kusto queries interactively:
   - Ctrl+Enter submits the query (Ctrl+M in some terminals)
   - Esc cancels and returns to chat
 - On submit, the first line is echoed with an ellipsis and the query runs.
-- After results complete, you’ll see a summary, a compact table snapshot, and a hint: “Press Enter to open interactively.”
+- After results complete, you’ll see a summary, a compact table snapshot, and a hint: “Press F6 to open interactively.”
 - Resize dynamically adjusts the editor and output panel heights.
 
 Tip: For quick one-liners, keep using `kql: ...`. For anything longer or pipelined, use `edit`.

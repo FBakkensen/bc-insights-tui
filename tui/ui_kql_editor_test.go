@@ -279,7 +279,7 @@ func TestEditorMode_F6_WithResults(t *testing.T) {
 		t.Fatalf("expected closed message; got: %q", m4.content)
 	}
 	// Verify returnMode was cleared
-	if m4.returnMode != 0 {
+	if m4.returnMode != modeUnknown {
 		t.Fatalf("expected returnMode to be cleared after close; got %v", m4.returnMode)
 	}
 }

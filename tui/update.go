@@ -55,7 +55,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle F6 globally (from both chat and editor modes)
-	if msg.String() == "f6" {
+	if msg.Type == tea.KeyF6 {
 		if m.mode == modeChat || m.mode == modeKQLEditor {
 			return m.openTableFromLastResults()
 		}
@@ -102,17 +102,17 @@ func (m model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			"returnedToMode", func() string {
 				switch m.mode {
 				case modeChat:
-					return "chat"
+					return logModeChat
 				case modeKQLEditor:
-					return "editor"
+					return logModeEditor
 				default:
-					return "unknown"
+					return logModeUnknown
 				}
 			}(),
 		)
 
-		// Clear returnMode
-		m.returnMode = 0
+		// Clear returnMode to explicit unknown sentinel to avoid accidental 'chat'
+		m.returnMode = modeUnknown
 		m.append("Closed results table.")
 		if m.followTail || m.vp.AtBottom() {
 			m.vp.GotoBottom()
