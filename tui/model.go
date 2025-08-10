@@ -284,11 +284,13 @@ type (
 	}
 	// KQL messages
 	kqlResultMsg struct {
-		tableName string
-		columns   []appinsights.Column
-		rows      [][]interface{}
-		duration  time.Duration
-		err       error
+		tableName      string
+		columns        []appinsights.Column
+		rows           [][]interface{}
+		duration       time.Duration
+		err            error
+		limiterApplied bool
+		effectiveFetch int
 	}
 )
 
@@ -461,6 +463,10 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 	if fetch <= 0 {
 		fetch = 50
 	}
+
+	// Apply fetch size enforcement
+	finalQuery, limiterApplied, effectiveFetch := enforceFetchSizeLimit(query, fetch)
+
 	// Logging user action without full query text
 	hash := sha256.Sum256([]byte(query))
 	qhash := hex.EncodeToString(hash[:8])
@@ -473,7 +479,8 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 		"query_hash", qhash,
 		"first_token", firstToken,
 		"timeout_s", fmt.Sprintf("%d", timeoutSec),
-		"fetch_size", fmt.Sprintf("%d", fetch),
+		"fetch_size", fmt.Sprintf("%d", effectiveFetch),
+		"limiter_applied", fmt.Sprintf("%t", limiterApplied),
 	)
 
 	// Perform preflight outside the closure to avoid capturing m
@@ -490,14 +497,14 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 			"appId_len", fmt.Sprintf("%d", len(strings.TrimSpace(appID))),
 			"deadline", deadline.Format(time.RFC3339),
 		)
-		if err := client.ValidateQuery(query); err != nil {
+		if err := client.ValidateQuery(finalQuery); err != nil {
 			logging.Error("KQL validation failed", "error", err.Error())
-			return kqlResultMsg{err: err}
+			return kqlResultMsg{err: err, limiterApplied: limiterApplied, effectiveFetch: effectiveFetch}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
 		defer cancel()
 		start := time.Now()
-		resp, err := client.ExecuteQuery(ctx, query)
+		resp, err := client.ExecuteQuery(ctx, finalQuery)
 		dur := time.Since(start)
 		if err != nil {
 			mapped := mapKQLError(err, timeoutSec, ctx.Err())
@@ -505,7 +512,7 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 			if ctx.Err() != nil {
 				logging.Error("KQL context error", "ctxErr", ctx.Err().Error(), "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()))
 			}
-			return kqlResultMsg{duration: dur, err: mapped}
+			return kqlResultMsg{duration: dur, err: mapped, limiterApplied: limiterApplied, effectiveFetch: effectiveFetch}
 		}
 		// Parse results; prefer PrimaryResult if available
 		tableName := ""
@@ -529,12 +536,57 @@ func (m *model) runKQLCmd(query string) tea.Cmd {
 			"cols", fmt.Sprintf("%d", len(cols)),
 			"table", util.FirstNonEmpty(tableName, "PrimaryResult"),
 		)
-		return kqlResultMsg{tableName: tableName, columns: cols, rows: rows, duration: dur}
+		return kqlResultMsg{tableName: tableName, columns: cols, rows: rows, duration: dur, limiterApplied: limiterApplied, effectiveFetch: effectiveFetch}
 	}
+}
+
+// enforceFetchSizeLimit analyzes a KQL query and appends a take limiter if no row constraint exists.
+// Returns the final query, whether a limiter was applied, and the effective fetch size.
+func enforceFetchSizeLimit(query string, fetchSize int) (finalQuery string, applied bool, effectiveFetch int) {
+	// Normalize fetch size - fall back to 50 if <= 0
+	effectiveFetch = fetchSize
+	if effectiveFetch <= 0 {
+		logging.Info("Normalized fetch size", "old_value", fmt.Sprintf("%d", fetchSize), "new_value", "50")
+		effectiveFetch = 50
+	}
+
+	// Check if query already has row constraints (case-insensitive, textual search)
+	lowerQuery := strings.ToLower(query)
+
+	// Look for take/limit patterns: | take <int> or | limit <int>
+	if strings.Contains(lowerQuery, "| take ") || strings.Contains(lowerQuery, "| limit ") {
+		return query, false, effectiveFetch
+	}
+
+	// Look for top pattern: | top <int> by (must have "by" to be a row limiter)
+	if strings.Contains(lowerQuery, "| top ") && strings.Contains(lowerQuery, " by") {
+		// Simple check: if "| top" appears before " by" in the query, consider it constrained
+		topPos := strings.Index(lowerQuery, "| top ")
+		byPos := strings.Index(lowerQuery, " by")
+		if topPos >= 0 && byPos > topPos {
+			return query, false, effectiveFetch
+		}
+	}
+
+	// No constraints found - append limiter
+	// Handle multi-line: add on new line if query doesn't end with newline
+	finalQuery = query
+	if !strings.HasSuffix(query, "\n") {
+		finalQuery += "\n"
+	}
+	finalQuery += fmt.Sprintf("| take %d", effectiveFetch)
+
+	return finalQuery, true, effectiveFetch
 }
 
 // preflightKQL ensures the user is authenticated and App Id is set
 func (m *model) preflightKQL(appID string) error {
+	// Skip auth check if we have an injected KQL client (for testing)
+	if m.kqlClient != nil {
+		logging.Debug("KQL preflight ok (injected client)")
+		return nil
+	}
+
 	if m.authenticator == nil || !m.authenticator.HasValidToken() {
 		logging.Error("KQL preflight auth check failed", "hasAuthenticator", fmt.Sprintf("%v", m.authenticator != nil))
 		return fmt.Errorf("authentication required. run 'login' to complete device code sign-in. likely cause: expired or missing token. next: verify you can access Application Insights in the Azure portal: https://portal.azure.com")
