@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -95,6 +96,9 @@ func NewClientWithAuthenticator(authenticator ApplicationInsightsAuthenticator, 
 
 // ExecuteQuery executes a KQL query against Application Insights
 func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse, error) {
+	// Apply configured fetch limit to simple top-level table queries when not explicitly set
+	query = c.maybeApplyFetchLimit(query)
+
 	// Get a valid token, either from stored token or via authenticator
 	token, err := c.getValidToken(ctx)
 	if err != nil {
@@ -222,6 +226,90 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	}
 
 	return &queryResp, nil
+}
+
+// applyFetchLimitIfNeeded appends "| take <fetch>" to the first statement when:
+// - fetch > 0
+// - the first statement starts with a known top-level table
+// - the first statement does NOT already contain a top-level take/limit operator
+// Returns: possibly-mutated query, whether applied, and a short reason code.
+func applyFetchLimitIfNeeded(query string, fetch int) (string, bool, string) {
+	if fetch <= 0 {
+		return query, false, "fetch_zero"
+	}
+	// Work on the first statement only (before the first ';')
+	parts := strings.SplitN(query, ";", 2)
+	firstOrig := parts[0]
+	first := strings.TrimSpace(firstOrig)
+	if first == "" {
+		return query, false, "empty_stmt"
+	}
+	// Must start with a known table name on the first non-empty line
+	if !startsWithKnownTable(first) {
+		return query, false, "not_table_first"
+	}
+	// Detect explicit user limit/take in the first statement (case-insensitive)
+	// We consider appearances either right after a pipeline '|' or at statement start
+	// (rare but supported), with word boundary to avoid matching column names.
+	re := regexp.MustCompile(`(?i)(^|\|)\s*(take|limit)\b`)
+	if re.MatchString(first) {
+		return query, false, "user_explicit"
+	}
+	// Append take to first statement and preserve any original whitespace
+	mutatedFirst := firstOrig + fmt.Sprintf(" | take %d", fetch)
+	if len(parts) == 2 {
+		// Preserve original ';' and remainder exactly
+		return mutatedFirst + ";" + parts[1], true, "applied_table_no_user_limit"
+	}
+	return mutatedFirst, true, "applied_table_no_user_limit"
+}
+
+// startsWithKnownTable checks if the provided statement's first token is a known AI table
+func startsWithKnownTable(stmt string) bool {
+	// Consider only the first line to mirror ValidateQuery behavior
+	lines := strings.Split(stmt, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	firstLine := strings.TrimSpace(lines[0])
+	if firstLine == "" {
+		return false
+	}
+	toks := strings.Fields(firstLine)
+	if len(toks) == 0 {
+		return false
+	}
+	table := strings.ToLower(toks[0])
+	knownTables := map[string]struct{}{
+		"traces":              {},
+		"requests":            {},
+		"dependencies":        {},
+		"exceptions":          {},
+		"pageviews":           {},
+		"browsertimings":      {},
+		"customevents":        {},
+		"custommetrics":       {},
+		"performancecounters": {},
+		"availabilityresults": {},
+	}
+	_, ok := knownTables[table]
+	return ok
+}
+
+// maybeApplyFetchLimit loads config and applies fetch limit if appropriate. It logs a concise decision.
+func (c *Client) maybeApplyFetchLimit(query string) string {
+	cfg := cfgpkg.LoadConfigWithArgs(nil)
+	if cfg.LogFetchSize <= 0 {
+		logging.Debug("KQL fetch limit not applied", "reason", "fetch_zero", "limit", fmt.Sprintf("%d", cfg.LogFetchSize))
+		return query
+	}
+	mutated, applied, reason := applyFetchLimitIfNeeded(query, cfg.LogFetchSize)
+	if applied {
+		logging.Debug("KQL fetch limit applied", "limit", fmt.Sprintf("%d", cfg.LogFetchSize), "reason", reason)
+		return mutated
+	}
+	logging.Debug("KQL fetch limit not applied", "reason", reason, "limit", fmt.Sprintf("%d", cfg.LogFetchSize))
+	return query
 }
 
 // computeDeadlineFields returns (timeout_set, deadline) strings for logging.

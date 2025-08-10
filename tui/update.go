@@ -2,8 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,11 +12,15 @@ import (
 
 	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
+	"github.com/FBakkensen/bc-insights-tui/internal/telemetry"
 	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
-const keyEsc = "esc"
+const (
+	keyEsc   = "esc"
+	keyEnter = "enter"
+)
 
 // Init starts device flow automatically if no valid token exists.
 func (m model) Init() tea.Cmd {
@@ -76,6 +81,10 @@ func (m model) handleKeyMessage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.mode == modeTableResults {
 		return m.handleTableKey(msg)
 	}
+	// When in details mode, allow scrolling and Esc to close
+	if m.mode == modeDetails {
+		return m.handleDetailsKey(msg)
+	}
 	// In chat mode: Let textarea consume keys first so typing works
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(msg)
@@ -119,9 +128,47 @@ func (m model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.vp.GotoBottom()
 		}
 		return m, nil
+	case keyEnter:
+		// Open details for selected row
+		sel := m.tbl.SelectedRow()
+		if sel != nil {
+			idx := m.tbl.Cursor()
+			if idx >= 0 && idx < len(m.lastRows) {
+				ts, msg, fields := buildDetailsSafe(m.lastColumns, m.lastRows[idx])
+				hasTS := ts != ""
+				logging.Info("details_opened",
+					"table", util.FirstNonEmpty(m.lastTable, "PrimaryResult"),
+					"row_index", fmt.Sprintf("%d", idx),
+					"has_timestamp", fmt.Sprintf("%v", hasTS),
+					"custom_count", fmt.Sprintf("%d", len(fields)),
+				)
+				m.detailsStart = time.Now()
+				m.detailsRow = idx
+				m.detailsContent = renderDetails(util.FirstNonEmpty(m.lastTable, "PrimaryResult"), idx, ts, msg, fields)
+				m.detailsVP.SetContent(m.detailsContent)
+				m.mode = modeDetails
+				return m, nil
+			}
+		}
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.tbl, cmd = m.tbl.Update(msg)
+		return m, cmd
+	}
+}
+
+// handleDetailsKey processes keys in details mode (Esc to close)
+func (m model) handleDetailsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyEsc:
+		dur := time.Since(m.detailsStart)
+		logging.Info("details_closed", "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()))
+		m.mode = modeTableResults
+		return m, nil
 	}
 	var cmd tea.Cmd
-	m.tbl, cmd = m.tbl.Update(msg)
+	m.detailsVP, cmd = m.detailsVP.Update(msg)
 	return m, cmd
 }
 
@@ -257,6 +304,9 @@ func (m model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	// size table similarly
 	m.tbl.SetWidth(innerWidth)
 	m.tbl.SetHeight(vpHeight)
+	// size details viewport
+	m.detailsVP.Width = innerWidth
+	m.detailsVP.Height = vpHeight
 	if m.followTail || m.vp.AtBottom() {
 		m.vp.GotoBottom()
 		m.followTail = true
@@ -276,7 +326,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "esc":
 		m.quitting = true
 		return m, tea.Quit
-	case "enter":
+	case keyEnter:
 		// Only submit when we're in single-line mode (InsertNewline disabled)
 		if m.ta.KeyMap.InsertNewline.Enabled() {
 			return m, nil
@@ -584,6 +634,24 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// Build snapshot
+	// Compute normalized display headers once from ALL rows (union of customDimensions keys)
+	m.lastDisplayHeaders = buildHeadersForAllRows(res.columns, res.rows)
+	// Log header diagnostics for troubleshooting very wide schemas
+	customCount := 0
+	if len(m.lastDisplayHeaders) >= 2 {
+		customCount = len(m.lastDisplayHeaders) - 2
+	}
+	sample := ""
+	if customCount > 0 {
+		max := min(customCount, 5)
+		sampleKeys := m.lastDisplayHeaders[2 : 2+max]
+		sample = strings.Join(sampleKeys, ",")
+	}
+	logging.Info("Canonical headers computed",
+		"count", fmt.Sprintf("%d", len(m.lastDisplayHeaders)),
+		"custom_count", fmt.Sprintf("%d", customCount),
+		"example_keys", sample,
+	)
 	summary := fmt.Sprintf("Query complete in %.3fs · %d rows · table: %s", res.duration.Seconds(), len(res.rows), util.FirstNonEmpty(res.tableName, "PrimaryResult"))
 	m.append(summary)
 	snapshot := m.renderSnapshot(res.columns, res.rows)
@@ -609,99 +677,165 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 }
 
 // renderSnapshot builds a Bubbles table string with dynamic columns, limited rows
+// nolint:gocyclo // Snapshot layout has a few branches to keep output readable; tested by UI suite.
 func (m *model) renderSnapshot(columns []appinsights.Column, rows [][]interface{}) string {
-	// Limit rows to fetch size
+	// Limit rows to fetch size (for display only)
 	maxRows := m.cfg.LogFetchSize
 	if maxRows <= 0 {
 		maxRows = 50
 	}
+	if len(rows) == 0 {
+		return ""
+	}
 	if len(rows) < maxRows {
 		maxRows = len(rows)
 	}
-	// Build columns definitions with equal widths
-	colCount := len(columns)
-	if colCount == 0 {
+	// Normalize to only timestamp, message, and customDimensions keys
+	headers := m.lastDisplayHeaders
+	if len(headers) == 0 {
+		// fallback if headers weren't precomputed (tests or direct calls)
+		headers, _ = buildDisplayMatrix(columns, rows[:maxRows], maxRows)
+		m.lastDisplayHeaders = headers
+	}
+	_, data := buildDisplayMatrixFromHeaders(headers, columns, rows[:maxRows])
+	if len(headers) == 0 {
 		return ""
 	}
 	width := m.vp.Width
 	if width <= 0 {
 		width = 80
 	}
-	// Reserve minimal padding for borders already handled by container; just split equally
-	per := width / colCount
-	if per < 5 {
-		per = 5
+	const minColWidth = 14
+	colCount := len(headers)
+	visibleCols := colCount
+	ellipsis := false
+	maxFit := width / minColWidth
+	if maxFit < 1 {
+		maxFit = 1
 	}
-	cols := make([]table.Column, 0, colCount)
-	for _, c := range columns {
-		cols = append(cols, table.Column{Title: c.Name, Width: per})
+	if colCount > maxFit {
+		ellipsis = true
+		visibleCols = maxFit
 	}
-	// Build rows as []table.Row (slice of string)
-	trows := make([]table.Row, 0, maxRows)
-	for i := 0; i < maxRows; i++ {
-		r := rows[i]
-		tr := make([]string, 0, colCount)
-		for j := 0; j < colCount && j < len(r); j++ {
-			v := r[j]
-			if v == nil {
-				tr = append(tr, "")
-				continue
-			}
-			// Format primitives via fmt.Sprint
-			tr = append(tr, sprintAny(v))
+	dataCols := visibleCols
+	if ellipsis && visibleCols > 0 {
+		dataCols = visibleCols - 1
+	}
+	per := width / visibleCols
+	if per < minColWidth {
+		per = minColWidth
+	}
+	cols := make([]table.Column, 0, visibleCols)
+	for i := 0; i < dataCols && i < len(headers); i++ {
+		cols = append(cols, table.Column{Title: headers[i], Width: per})
+	}
+	if ellipsis {
+		hidden := colCount - dataCols
+		if hidden < 0 {
+			hidden = 0
 		}
-		// ensure length matches columns
-		for len(tr) < colCount {
+		logging.Info("Snapshot columns truncated",
+			"width", fmt.Sprintf("%d", width),
+			"colCount", fmt.Sprintf("%d", colCount),
+			"visible", fmt.Sprintf("%d", visibleCols),
+			"dataCols", fmt.Sprintf("%d", dataCols),
+			"hidden", fmt.Sprintf("%d", hidden),
+		)
+		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", hidden), Width: per})
+	}
+	trows := make([]table.Row, 0, len(data))
+	for _, r := range data {
+		tr := make([]string, 0, visibleCols)
+		for j := 0; j < dataCols && j < len(r); j++ {
+			tr = append(tr, r[j])
+		}
+		for len(tr) < dataCols {
 			tr = append(tr, "")
+		}
+		if ellipsis {
+			tr = append(tr, "…")
 		}
 		trows = append(trows, tr)
 	}
-
 	tm := table.New(
 		table.WithColumns(cols),
 		table.WithRows(trows),
 		table.WithWidth(width),
 		table.WithHeight(min(10, m.vp.Height)),
 	)
-	// Not focused in snapshot mode
 	tm.Blur()
 	return tm.View()
 }
 
 // initInteractiveTable builds a focused table model with all rows and columns
+// nolint:gocyclo // Column sizing and ordering branches kept explicit for readability.
 func (m *model) initInteractiveTable() {
 	columns := m.lastColumns
 	rows := m.lastRows
-	colCount := len(columns)
-	if colCount == 0 {
+	if len(columns) == 0 || len(rows) == 0 {
 		m.tbl = table.New()
 		return
 	}
+	headers := m.lastDisplayHeaders
+	if len(headers) == 0 {
+		headers, _ = buildDisplayMatrix(columns, rows, len(rows))
+		m.lastDisplayHeaders = headers
+	}
+	_, data := buildDisplayMatrixFromHeaders(headers, columns, rows)
 	width := m.vp.Width
 	if width <= 0 {
 		width = 80
 	}
-	per := width / colCount
-	if per < 5 {
-		per = 5
+	const minColWidth = 14
+	colCount := len(headers)
+	visibleCols := colCount
+	ellipsis := false
+	maxFit := width / minColWidth
+	if maxFit < 1 {
+		maxFit = 1
 	}
-	cols := make([]table.Column, 0, colCount)
-	for _, c := range columns {
-		cols = append(cols, table.Column{Title: c.Name, Width: per})
+	if colCount > maxFit {
+		ellipsis = true
+		visibleCols = maxFit
 	}
-	trows := make([]table.Row, 0, len(rows))
-	for _, r := range rows {
-		tr := make([]string, 0, colCount)
-		for j := 0; j < colCount && j < len(r); j++ {
-			v := r[j]
-			if v == nil {
-				tr = append(tr, "")
-			} else {
-				tr = append(tr, sprintAny(v))
-			}
+	dataCols := visibleCols
+	if ellipsis && visibleCols > 0 {
+		dataCols = visibleCols - 1
+	}
+	per := width / visibleCols
+	if per < minColWidth {
+		per = minColWidth
+	}
+
+	cols := make([]table.Column, 0, visibleCols)
+	for i := 0; i < dataCols && i < len(headers); i++ {
+		cols = append(cols, table.Column{Title: headers[i], Width: per})
+	}
+	if ellipsis {
+		hidden := colCount - dataCols
+		if hidden < 0 {
+			hidden = 0
 		}
-		for len(tr) < colCount {
+		logging.Info("Interactive columns truncated",
+			"width", fmt.Sprintf("%d", width),
+			"colCount", fmt.Sprintf("%d", colCount),
+			"visible", fmt.Sprintf("%d", visibleCols),
+			"dataCols", fmt.Sprintf("%d", dataCols),
+			"hidden", fmt.Sprintf("%d", hidden),
+		)
+		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", hidden), Width: per})
+	}
+	trows := make([]table.Row, 0, len(data))
+	for _, r := range data {
+		tr := make([]string, 0, visibleCols)
+		for j := 0; j < dataCols && j < len(r); j++ {
+			tr = append(tr, r[j])
+		}
+		for len(tr) < dataCols {
 			tr = append(tr, "")
+		}
+		if ellipsis {
+			tr = append(tr, "…")
 		}
 		trows = append(trows, tr)
 	}
@@ -716,40 +850,192 @@ func (m *model) initInteractiveTable() {
 
 // firstNonEmpty moved to internal/util; use util.FirstNonEmpty
 
-func sprintAny(v interface{}) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case fmt.Stringer:
-		return t.String()
-	case float64:
-		// avoid scientific notation for whole numbers if common in KQL
-		if t == float64(int64(t)) {
-			return strconv.FormatInt(int64(t), 10)
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case float32:
-		if t == float32(int64(t)) {
-			return strconv.FormatInt(int64(t), 10)
-		}
-		return strconv.FormatFloat(float64(t), 'f', -1, 32)
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%v", t)
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%v", t)
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	default:
-		return fmt.Sprintf("%v", t)
-	}
-}
-
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
+}
+
+// buildDetailsSafe bridges to internal telemetry helper without leaking the package into UI tests
+func buildDetailsSafe(columns []appinsights.Column, row []interface{}) (string, string, []telemetry.DetailField) {
+	return telemetry.BuildDetails(columns, row)
+}
+
+// renderDetails builds the content string for the details viewport.
+func renderDetails(table string, rowIdx int, timestamp, message string, fields []telemetry.DetailField) string {
+	b := &strings.Builder{}
+	// Header
+	fmt.Fprintf(b, "Details — %s · row %d\n", util.FirstNonEmpty(table, "PrimaryResult"), rowIdx)
+	// Timestamp
+	if strings.TrimSpace(timestamp) != "" {
+		fmt.Fprintf(b, "timestamp: %s\n", timestamp)
+	}
+	// Message
+	if strings.TrimSpace(message) != "" {
+		fmt.Fprintf(b, "message: %s\n", message)
+	}
+	// customDimensions section
+	fmt.Fprintf(b, "customDimensions:\n")
+	if len(fields) == 0 {
+		fmt.Fprintf(b, "  <none>\n")
+		return b.String()
+	}
+	for _, f := range fields {
+		// indent keys for readability
+		fmt.Fprintf(b, "  %s: %s\n", f.Key, f.Value)
+	}
+	return b.String()
+}
+
+// buildDisplayMatrix constructs headers and row strings for display using only
+// timestamp, message, and flattened customDimensions keys. The set of custom keys
+// is discovered from up to sampleLimit rows for a stable header set.
+func buildDisplayMatrix(columns []appinsights.Column, rows [][]interface{}, sampleLimit int) ([]string, [][]string) {
+	if len(rows) == 0 {
+		return []string{}, [][]string{}
+	}
+	// Discover union of custom keys from a sample
+	limit := clamp(sampleLimit, 1, len(rows))
+	customKeys := discoverCanonicalKeys(columns, rows[:limit])
+	// Sorted keys for deterministic headers
+	sort.Slice(customKeys, func(i, j int) bool {
+		li, lj := strings.ToLower(customKeys[i]), strings.ToLower(customKeys[j])
+		if li == lj {
+			return customKeys[i] < customKeys[j]
+		}
+		return li < lj
+	})
+	headers := make([]string, 0, 2+len(customKeys))
+	headers = append(headers, "timestamp", "message")
+	headers = append(headers, customKeys...)
+
+	data := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		ts, msg, fields := telemetry.BuildDetails(columns, r)
+		fm, fmLower := normalizeFieldMaps(fields)
+		line := make([]string, 0, len(headers))
+		line = append(line, ts, msg)
+		for _, k := range customKeys {
+			if v, ok := fm[k]; ok {
+				line = append(line, v)
+				continue
+			}
+			if v, ok := fmLower[strings.ToLower(k)]; ok {
+				line = append(line, v)
+				continue
+			}
+			line = append(line, "")
+		}
+		data = append(data, line)
+	}
+	return headers, data
+}
+
+// buildDisplayMatrixFromHeaders creates data rows aligned to a fixed headers slice
+// (timestamp, message, and a fixed set of custom keys). This guarantees identical
+// columns/count between snapshot and interactive lists.
+func buildDisplayMatrixFromHeaders(headers []string, columns []appinsights.Column, rows [][]interface{}) ([]string, [][]string) {
+	if len(headers) == 0 || len(rows) == 0 {
+		return headers, [][]string{}
+	}
+	// Identify which headers are custom keys (everything after the first two)
+	customKeys := []string{}
+	if len(headers) > 2 {
+		customKeys = headers[2:]
+	}
+	data := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		ts, msg, fields := telemetry.BuildDetails(columns, r)
+		fm, fmLower := normalizeFieldMaps(fields)
+		line := make([]string, 0, len(headers))
+		line = append(line, ts, msg)
+		for _, k := range customKeys {
+			if v, ok := fm[k]; ok {
+				line = append(line, v)
+				continue
+			}
+			if v, ok := fmLower[strings.ToLower(k)]; ok {
+				line = append(line, v)
+				continue
+			}
+			line = append(line, "")
+		}
+		data = append(data, line)
+	}
+	return headers, data
+}
+
+// buildHeadersForAllRows returns the canonical headers using all rows to discover
+// the union of customDimensions keys. Order: timestamp, message, then sorted keys.
+func buildHeadersForAllRows(columns []appinsights.Column, rows [][]interface{}) []string {
+	if len(rows) == 0 {
+		return []string{"timestamp", "message"}
+	}
+	// Case-insensitive de-duplication with canonical first-seen casing
+	keys := discoverCanonicalKeys(columns, rows)
+	sort.Slice(keys, func(i, j int) bool {
+		li, lj := strings.ToLower(keys[i]), strings.ToLower(keys[j])
+		if li == lj {
+			return keys[i] < keys[j]
+		}
+		return li < lj
+	})
+	headers := make([]string, 0, 2+len(keys))
+	headers = append(headers, "timestamp", "message")
+	headers = append(headers, keys...)
+	return headers
+}
+
+// normalizeFieldMaps builds two lookup maps from detail fields:
+// - fm: exact-case key mapping to value (last one wins)
+// - fmLower: lower-cased key mapping to first-seen value
+func normalizeFieldMaps(fields []telemetry.DetailField) (map[string]string, map[string]string) {
+	fm := make(map[string]string, len(fields))
+	fmLower := make(map[string]string, len(fields))
+	for _, f := range fields {
+		k := strings.TrimSpace(f.Key)
+		if k == "" {
+			continue
+		}
+		lk := strings.ToLower(k)
+		if _, exists := fmLower[lk]; !exists {
+			fmLower[lk] = f.Value
+		}
+		fm[k] = f.Value
+	}
+	return fm, fmLower
+}
+
+// discoverCanonicalKeys returns a de-duplicated (case-insensitive) list of custom keys
+// preserving the first-seen casing across the provided rows.
+func discoverCanonicalKeys(columns []appinsights.Column, rows [][]interface{}) []string {
+	seen := make(map[string]struct{})
+	keys := make([]string, 0)
+	for _, r := range rows {
+		_, _, fields := telemetry.BuildDetails(columns, r)
+		for _, f := range fields {
+			k := strings.TrimSpace(f.Key)
+			if k == "" {
+				continue
+			}
+			lk := strings.ToLower(k)
+			if _, ok := seen[lk]; !ok {
+				seen[lk] = struct{}{}
+				keys = append(keys, k)
+			}
+		}
+	}
+	return keys
+}
+
+// clamp x to [minVal, maxVal]
+func clamp(x, minVal, maxVal int) int {
+	if x < minVal {
+		return minVal
+	}
+	if x > maxVal {
+		return maxVal
+	}
+	return x
 }

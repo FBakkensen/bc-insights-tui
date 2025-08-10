@@ -51,6 +51,9 @@ func newTestModel() model {
 		maxContentWidth: 120,
 		followTail:      true,
 	}
+	// Initialize details viewport to sane defaults used by view
+	m.detailsVP = viewport.New(80, 10)
+	m.detailsVP.SetContent("")
 	return m
 }
 
