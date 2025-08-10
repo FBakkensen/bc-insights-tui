@@ -77,7 +77,7 @@ Scope: delete the existing TUI implementation and re-implement the UI progressiv
 - Default: single-line chat input where `kql: <query>` executes immediately.
 - Execution flow:
   - Append “Running…” message; upon completion append a summary and a results snapshot (rendered using bubbles/table to a string) into scrollback.
-  - Provide hint: “Press Enter to open interactively.”
+  - Provide hint: “Press F6 to open interactively.”
   - When activated, switch top panel to an interactive table (bubbles/table) with dynamic columns from the KQL `project` result. Esc returns to scrollback.
 
 See the detailed spec and tests: `docs/specs/step-5-single-line-kql.md`.
@@ -93,7 +93,7 @@ Usage and behavior (implemented):
   - Ctrl+Enter submits (Ctrl+M in some terminals)
   - Esc cancels and returns to chat
 - On submit, the first line of the query is echoed with an ellipsis and the query runs while staying in editor mode.
-- After completion, a summary and table snapshot are added to the scrollback with a hint to press Esc to exit editor, then Enter to open results interactively.
+- After completion, a summary and table snapshot are added to the scrollback with a hint to press Esc to exit editor, then F6 to open results interactively.
 - Resize dynamically balances the viewport (top) and editor (bottom) heights.
 
 ## Command summary (initial set)

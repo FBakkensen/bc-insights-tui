@@ -97,15 +97,18 @@ func TestKQL_SnapshotAndOpenInteractively(t *testing.T) {
 	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
 	m2Any, _ := m.Update(kqlResultMsg{tableName: "PrimaryResult", columns: cols, rows: rows, duration: 10 * time.Millisecond})
 	m2 := m2Any.(model)
-	if !strings.Contains(m2.content, "Press Enter to open interactively.") {
+	if !strings.Contains(m2.content, "Press F6 to open interactively.") {
 		t.Fatalf("expected hint to open interactively; got: %q", m2.content)
 	}
-	// Press enter with empty chat
-	m2.ta.SetValue("")
-	m3Any, _ := m2.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	// Press F6 to open interactively
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyF6})
 	m3 := m3Any.(model)
 	if m3.mode != modeTableResults {
-		t.Fatalf("expected modeTableResults after empty enter; got %v", m3.mode)
+		t.Fatalf("expected modeTableResults after F6; got %v", m3.mode)
+	}
+	// Verify returnMode was set
+	if m3.returnMode != modeChat {
+		t.Fatalf("expected returnMode to be modeChat; got %v", m3.returnMode)
 	}
 	// Press Esc to return
 	m4Any, _ := m3.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -115,5 +118,90 @@ func TestKQL_SnapshotAndOpenInteractively(t *testing.T) {
 	}
 	if !strings.Contains(m4.content, "Closed results table.") {
 		t.Fatalf("expected closed message; got: %q", m4.content)
+	}
+	// Verify returnMode was cleared
+	if m4.returnMode != modeUnknown {
+		t.Fatalf("expected returnMode to be cleared after close; got %v", m4.returnMode)
+	}
+}
+
+func TestChatMode_F6_WithResults(t *testing.T) {
+	cols := []appinsights.Column{{Name: "test"}}
+	rows := [][]interface{}{{"value"}}
+	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
+	// Set up results
+	m.lastColumns = cols
+	m.lastRows = rows
+	m.lastTable = "TestTable"
+	m.haveResults = true
+
+	// Press F6 in chat mode
+	m2Any, _ := m.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m2 := m2Any.(model)
+
+	// Should switch to table mode
+	if m2.mode != modeTableResults {
+		t.Fatalf("expected modeTableResults after F6; got %v", m2.mode)
+	}
+	// Should store chat mode for return
+	if m2.returnMode != modeChat {
+		t.Fatalf("expected returnMode to be modeChat; got %v", m2.returnMode)
+	}
+	// Should show opened message
+	if !strings.Contains(m2.content, "Opened results table.") {
+		t.Fatalf("expected opened message; got: %q", m2.content)
+	}
+}
+
+func TestChatMode_F6_WithoutResults(t *testing.T) {
+	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
+	// No results
+	m.haveResults = false
+
+	// Press F6 in chat mode
+	m2Any, _ := m.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m2 := m2Any.(model)
+
+	// Should remain in chat mode
+	if m2.mode != modeChat {
+		t.Fatalf("expected to remain in modeChat; got %v", m2.mode)
+	}
+	// Should show no results message
+	if !strings.Contains(m2.content, "No results to open.") {
+		t.Fatalf("expected no results message; got: %q", m2.content)
+	}
+}
+
+func TestTableMode_DelegatesNavAndPreservesReturn(t *testing.T) {
+	// Prepare a model with results and in chat mode
+	cols := []appinsights.Column{{Name: "A"}}
+	rows := [][]interface{}{{"1"}, {"2"}}
+	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
+	m.lastColumns = cols
+	m.lastRows = rows
+	m.lastTable = "T"
+	m.haveResults = true
+
+	// Open table via F6 from chat
+	m2Any, _ := m.Update(tea.KeyMsg{Type: tea.KeyF6})
+	m2 := m2Any.(model)
+	if m2.mode != modeTableResults {
+		t.Fatalf("expected modeTableResults; got %v", m2.mode)
+	}
+	if m2.returnMode != modeChat {
+		t.Fatalf("expected returnMode=modeChat; got %v", m2.returnMode)
+	}
+
+	// Send a navigation key (Right); ensure it delegates to table without closing or changing mode
+	m3Any, _ := m2.Update(tea.KeyMsg{Type: tea.KeyRight})
+	m3 := m3Any.(model)
+	if m3.mode != modeTableResults {
+		t.Fatalf("expected to remain in modeTableResults; got %v", m3.mode)
+	}
+	if m3.returnMode != modeChat {
+		t.Fatalf("expected returnMode to be preserved; got %v", m3.returnMode)
+	}
+	if strings.Contains(m3.content, "Closed results table.") {
+		t.Fatalf("did not expect close message on navigation key")
 	}
 }
