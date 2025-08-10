@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -550,22 +551,16 @@ func enforceFetchSizeLimit(query string, fetchSize int) (finalQuery string, appl
 		effectiveFetch = 50
 	}
 
-	// Check if query already has row constraints (case-insensitive, textual search)
-	lowerQuery := strings.ToLower(query)
-
-	// Look for take/limit patterns: | take <int> or | limit <int>
-	if strings.Contains(lowerQuery, "| take ") || strings.Contains(lowerQuery, "| limit ") {
+	// Use case-insensitive regex patterns for matching
+	takeLimitPattern := regexp.MustCompile(`(?i)\|\s*take\s+\d+|\|\s*limit\s+\d+`)
+	if takeLimitPattern.MatchString(query) {
 		return query, false, effectiveFetch
 	}
 
-	// Look for top pattern: | top <int> by (must have "by" to be a row limiter)
-	if strings.Contains(lowerQuery, "| top ") && strings.Contains(lowerQuery, " by") {
-		// Simple check: if "| top" appears before " by" in the query, consider it constrained
-		topPos := strings.Index(lowerQuery, "| top ")
-		byPos := strings.Index(lowerQuery, " by")
-		if topPos >= 0 && byPos > topPos {
-			return query, false, effectiveFetch
-		}
+	// Look for top pattern: | top <int> by <field> (must have "by" in the same operator to be a row limiter)
+	topByPattern := regexp.MustCompile(`(?i)\|\s*top\s+\d+\s+by\s+\S+`)
+	if topByPattern.MatchString(query) {
+		return query, false, effectiveFetch
 	}
 
 	// No constraints found - append limiter
