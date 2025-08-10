@@ -104,7 +104,7 @@ Development will proceed in phases to ensure a solid foundation and iterative pr
     * [x] **Ensure all authentication errors are helpful and actionable.**
 * **Phase 3: Application Insights Integration**
     * [x] Create the `appinsights` client to make authenticated API calls.
-    * [x] Implement a function to execute a basic KQL query that respects the configured fetch size.
+    * [ ] Implement a function to execute a basic KQL query that respects the configured fetch size.
     * [x] Create a view to display a list of log entries with default columns.
     * [ ] **Implement dynamic parsing of `customDimensions` based on `eventId` for the details view.**
     * [ ] Implement pagination logic to "load more" logs.
