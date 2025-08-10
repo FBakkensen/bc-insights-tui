@@ -383,6 +383,8 @@ func TestListAllSettings(t *testing.T) {
 		"oauth2.tenantId", "oauth2.clientId", "oauth2.scopes",
 		"queryHistoryMaxEntries", "queryTimeoutSeconds", "queryHistoryFile", "editorPanelRatio",
 		"azure.subscriptionId",
+		// Debug settings
+		"debug.appInsightsRawEnable", "debug.appInsightsRawFile", "debug.appInsightsRawMaxBytes",
 	}
 	for _, expectedSetting := range expectedSettings {
 		if _, exists := settings[expectedSetting]; !exists {
@@ -414,9 +416,9 @@ func TestListAllSettings(t *testing.T) {
 		t.Errorf("Expected oauth2.scopes to be the default value, got %q", settings["oauth2.scopes"])
 	}
 
-	// Check that no unexpected settings are present
-	if len(settings) != 12 {
-		t.Errorf("Expected exactly 12 settings, got %d: %v", len(settings), settings)
+	// Check that the total count matches expected with debug settings included
+	if len(settings) != 15 {
+		t.Errorf("Expected exactly 15 settings, got %d: %v", len(settings), settings)
 	}
 }
 

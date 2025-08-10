@@ -68,6 +68,10 @@ type Config struct {
 	QueryTimeoutSeconds    int           `json:"queryTimeoutSeconds" yaml:"queryTimeoutSeconds"`
 	QueryHistoryFile       string        `json:"queryHistoryFile" yaml:"queryHistoryFile"`
 	EditorPanelRatio       float32       `json:"editorPanelRatio" yaml:"editorPanelRatio"`
+	// Debugging - App Insights raw capture
+	DebugAppInsightsRawEnable   bool   `json:"debug.appInsightsRawEnable" yaml:"debug.appInsightsRawEnable"`
+	DebugAppInsightsRawFile     string `json:"debug.appInsightsRawFile" yaml:"debug.appInsightsRawFile"`
+	DebugAppInsightsRawMaxBytes int    `json:"debug.appInsightsRawMaxBytes" yaml:"debug.appInsightsRawMaxBytes"`
 }
 
 // NewConfig creates a new Config with default values and initialized mutex
@@ -86,10 +90,13 @@ func NewConfig() Config {
 				"https://management.azure.com/user_impersonation",
 			},
 		},
-		QueryHistoryMaxEntries: 100,
-		QueryTimeoutSeconds:    30,
-		QueryHistoryFile:       ".bc-insights-query-history.json",
-		EditorPanelRatio:       0.4,
+		QueryHistoryMaxEntries:      100,
+		QueryTimeoutSeconds:         30,
+		QueryHistoryFile:            ".bc-insights-query-history.json",
+		EditorPanelRatio:            0.4,
+		DebugAppInsightsRawEnable:   false,
+		DebugAppInsightsRawFile:     "logs/appinsights-raw.yaml",
+		DebugAppInsightsRawMaxBytes: 1048576,
 	}
 }
 
@@ -115,6 +122,7 @@ func applyEnvironmentVariables(cfg *Config) {
 	applyBasicEnvVars(cfg)
 	applyOAuth2EnvVars(cfg)
 	applyKQLEditorEnvVars(cfg)
+	applyAIRawDebugEnvVars(cfg)
 }
 
 // applyBasicEnvVars applies basic configuration environment variables
@@ -183,8 +191,31 @@ func applyKQLEditorEnvVars(cfg *Config) {
 	}
 }
 
+// applyAIRawDebugEnvVars applies environment variables for App Insights raw debug capture
+func applyAIRawDebugEnvVars(cfg *Config) {
+	if v, ok := os.LookupEnv("BCINSIGHTS_AI_RAW_ENABLE"); ok {
+		lv := strings.ToLower(strings.TrimSpace(v))
+		cfg.DebugAppInsightsRawEnable = (lv == "1" || lv == "true" || lv == "yes")
+	}
+	if v, ok := os.LookupEnv("BCINSIGHTS_AI_RAW_FILE"); ok {
+		cfg.DebugAppInsightsRawFile = v // allow empty to clear
+	}
+	if v, ok := os.LookupEnv("BCINSIGHTS_AI_RAW_MAX_BYTES"); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && parsed >= 0 {
+			cfg.DebugAppInsightsRawMaxBytes = parsed
+		}
+	}
+}
+
 // mergeConfig merges file configuration into the base config.
 func mergeConfig(base, file *Config) {
+	mergeBasic(base, file)
+	mergeOAuth2(base, file)
+	mergeKQLEditor(base, file)
+	mergeAIRawDebug(base, file)
+}
+
+func mergeBasic(base, file *Config) {
 	if file.LogFetchSize > 0 {
 		base.LogFetchSize = file.LogFetchSize
 	}
@@ -200,8 +231,9 @@ func mergeConfig(base, file *Config) {
 	if file.SubscriptionID != "" {
 		base.SubscriptionID = file.SubscriptionID
 	}
+}
 
-	// Merge OAuth2 configuration
+func mergeOAuth2(base, file *Config) {
 	if file.OAuth2.TenantID != "" {
 		base.OAuth2.TenantID = file.OAuth2.TenantID
 	}
@@ -211,8 +243,9 @@ func mergeConfig(base, file *Config) {
 	if len(file.OAuth2.Scopes) > 0 {
 		base.OAuth2.Scopes = file.OAuth2.Scopes
 	}
+}
 
-	// Merge KQL Editor configuration
+func mergeKQLEditor(base, file *Config) {
 	if file.QueryHistoryMaxEntries > 0 {
 		base.QueryHistoryMaxEntries = file.QueryHistoryMaxEntries
 	}
@@ -224,6 +257,20 @@ func mergeConfig(base, file *Config) {
 	}
 	if file.EditorPanelRatio > 0 && file.EditorPanelRatio < 1 {
 		base.EditorPanelRatio = file.EditorPanelRatio
+	}
+}
+
+func mergeAIRawDebug(base, file *Config) {
+	if file.DebugAppInsightsRawFile != "" {
+		base.DebugAppInsightsRawFile = file.DebugAppInsightsRawFile
+	}
+	// Enable flag merges directly (explicit override). Note: zero value false kept unless file explicitly sets true
+	if file.DebugAppInsightsRawEnable {
+		base.DebugAppInsightsRawEnable = true
+	}
+	if file.DebugAppInsightsRawMaxBytes >= 0 {
+		// Accept 0 (unlimited) and positive
+		base.DebugAppInsightsRawMaxBytes = file.DebugAppInsightsRawMaxBytes
 	}
 }
 
@@ -543,6 +590,15 @@ func (c *Config) ListAllSettings() map[string]string {
 		settings["queryHistoryFile"] = c.QueryHistoryFile
 	}
 	settings["editorPanelRatio"] = fmt.Sprintf("%.2f", c.EditorPanelRatio)
+
+	// Debug - AI Raw capture (exposed for visibility; toggle via env/file)
+	settings["debug.appInsightsRawEnable"] = fmt.Sprintf("%t", c.DebugAppInsightsRawEnable)
+	if c.DebugAppInsightsRawFile == "" {
+		settings["debug.appInsightsRawFile"] = notSetValue
+	} else {
+		settings["debug.appInsightsRawFile"] = c.DebugAppInsightsRawFile
+	}
+	settings["debug.appInsightsRawMaxBytes"] = strconv.Itoa(c.DebugAppInsightsRawMaxBytes)
 
 	return settings
 }
