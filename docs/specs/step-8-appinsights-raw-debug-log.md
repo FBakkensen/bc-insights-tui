@@ -53,8 +53,8 @@ New settings (file + env only; no new CLI flags required now):
   - Env: `BCINSIGHTS_AI_RAW_ENABLE=true|false`
   - Behavior: When true, the feature is active.
 - Setting name: `debug.appInsightsRawFile` (string)
-  - Default: `logs/appinsights-raw.json` (resolved relative to the app’s working directory; create `logs/` if missing)
-  - Env: `BCINSIGHTS_AI_RAW_FILE=custom\path\file.json`
+  - Default: `logs/appinsights-raw.yaml` (resolved relative to the app’s working directory; create `logs/` if missing)
+  - Env: `BCINSIGHTS_AI_RAW_FILE=custom\\path\\file.yaml`
 - Setting name: `debug.appInsightsRawMaxBytes` (int; optional)
   - Default: `1048576` (1 MiB) per body (request and response). `0` means unlimited.
   - Env: `BCINSIGHTS_AI_RAW_MAX_BYTES=2097152`
@@ -104,7 +104,7 @@ Where to hook
 - Implement inside `appinsights.Client.ExecuteQuery`. This method has everything needed: URL, headers, body JSON, and the response.
 
 Helper component
-- Add a tiny internal helper (package `logging` or a new package `debugdump`) with two functions:
+- Add a tiny internal helper (package `debugdump`) with two functions:
   - `WriteAIRawRequest(path string, req AIRawCapture) error` — serialize to YAML and write atomically.
   - `WriteAIRawFull(path string, full AIRawFullCapture) error` — overwrite with the full request+response payload in YAML.
 
@@ -179,5 +179,5 @@ Notes
 
 ## Windows/terminal notes
 
-- Paths: default `logs/appinsights-raw.json`. On Windows, ensure `logs\` exists and use `os.CreateTemp` + `os.Rename` for atomicity. File encoding is UTF-8 with `\r\n` newlines allowed in string values.
+- Paths: default `logs/appinsights-raw.yaml`. On Windows, ensure `logs\\` exists and use `os.CreateTemp` + `os.Rename` for atomicity. File encoding is UTF-8 with `\\r\\n` newlines allowed in string values.
 - No terminal interaction required; this feature operates entirely in the background during request execution.

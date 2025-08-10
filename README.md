@@ -138,7 +138,7 @@ Non-interactive commands (use with `-run=`):
 - `-run=keyring-test` – Write/read/delete a temporary keyring credential to validate access
 - `-run=logs[:N]` – Tail last N lines from the latest log file (default 200)
 
-Tip: for detailed auth notes and troubleshooting, see `docs/authentication.md`.
+Tip: for auth flow and troubleshooting, see `docs/overview.md` and the non-interactive diagnostics commands (`-run=login-status`, `-run=keyring-info`, `-run=keyring-test`).
 
 ### Configuration
 
@@ -160,7 +160,7 @@ $env:BCINSIGHTS_KEYRING_SERVICE = "bc-insights-tui"
 $env:BCINSIGHTS_KEYRING_NAMESPACE = "dev"
 ```
 
-See docs/authentication.md for details on the OAuth2 device flow, token storage, and troubleshooting frequent sign-ins.
+See `docs/overview.md` for the current architecture and non-interactive commands for OAuth2 login, token storage checks, and troubleshooting frequent sign-ins.
 
 ## 🎮 Usage
 

@@ -356,6 +356,8 @@ func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response,
 	redh := debugdump.RedactHeaders(rh)
 	// Pretty print response body JSON when possible
 	bodyStr, bodyLen, truncated := debugdump.FormatBodyPrettyJSON(respBody, maxBytes)
+	// Pretty print request body JSON and apply the same truncation policy for symmetry
+	reqBodyStr, reqBodyLen, reqTrunc := debugdump.FormatBodyPrettyJSON(bodyJSON, maxBytes)
 	full := debugdump.AIRawFullCapture{
 		Version:    1,
 		CapturedAt: debugdump.Now(),
@@ -364,9 +366,9 @@ func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response,
 			Method:    req.Method,
 			URL:       req.URL.String(),
 			Headers:   debugdump.RedactHeaders(map[string]string{"content-type": req.Header.Get("Content-Type"), "authorization": req.Header.Get("Authorization")}),
-			Body:      func() string { s, _, _ := debugdump.FormatBodyPrettyJSON(bodyJSON, 0); return s }(),
-			BodyBytes: len(bodyJSON),
-			Truncated: false,
+			Body:      reqBodyStr,
+			BodyBytes: reqBodyLen,
+			Truncated: reqTrunc,
 		},
 		Response: &debugdump.AIRawResponse{
 			CompletedAt: debugdump.Now(),
