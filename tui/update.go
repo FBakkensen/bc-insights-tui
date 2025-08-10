@@ -586,6 +586,12 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 	// Build snapshot
 	summary := fmt.Sprintf("Query complete in %.3fs · %d rows · table: %s", res.duration.Seconds(), len(res.rows), util.FirstNonEmpty(res.tableName, "PrimaryResult"))
 	m.append(summary)
+
+	// Add limiter applied note if applicable
+	if res.limiterApplied {
+		m.append(fmt.Sprintf("Applied server-side row cap: take %d", res.effectiveFetch))
+	}
+
 	snapshot := m.renderSnapshot(res.columns, res.rows)
 	if snapshot != "" {
 		m.append(snapshot)

@@ -74,7 +74,7 @@ func TestKQL_ValidationError_Message(t *testing.T) {
 	m2Any, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := m2Any.(model)
 	// Simulate command completion with validation error
-	m3Any, _ := m2.Update(kqlResultMsg{err: fmt.Errorf("bad query")})
+	m3Any, _ := m2.Update(kqlResultMsg{err: fmt.Errorf("bad query"), limiterApplied: false, effectiveFetch: 50})
 	m3 := m3Any.(model)
 	if !strings.Contains(m3.content, "bad query") {
 		t.Fatalf("expected validation error message; got: %q", m3.content)
@@ -84,7 +84,7 @@ func TestKQL_ValidationError_Message(t *testing.T) {
 func TestKQL_ZeroTables_NoResults(t *testing.T) {
 	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{Tables: []appinsights.Table{}}})
 	// Directly send result msg
-	m2Any, _ := m.Update(kqlResultMsg{columns: nil, rows: nil, duration: 10 * time.Millisecond})
+	m2Any, _ := m.Update(kqlResultMsg{columns: nil, rows: nil, duration: 10 * time.Millisecond, limiterApplied: false, effectiveFetch: 50})
 	m2 := m2Any.(model)
 	if !strings.Contains(m2.content, "No results.") {
 		t.Fatalf("expected 'No results.'; got: %q", m2.content)
@@ -95,7 +95,7 @@ func TestKQL_SnapshotAndOpenInteractively(t *testing.T) {
 	cols := []appinsights.Column{{Name: "a"}, {Name: "b"}}
 	rows := [][]interface{}{{"1", "x"}, {"2", "y"}}
 	m := newPostAuthModelWithKQL(&kqlOK{resp: &appinsights.QueryResponse{}})
-	m2Any, _ := m.Update(kqlResultMsg{tableName: "PrimaryResult", columns: cols, rows: rows, duration: 10 * time.Millisecond})
+	m2Any, _ := m.Update(kqlResultMsg{tableName: "PrimaryResult", columns: cols, rows: rows, duration: 10 * time.Millisecond, limiterApplied: false, effectiveFetch: 50})
 	m2 := m2Any.(model)
 	if !strings.Contains(m2.content, "Press F6 to open interactively.") {
 		t.Fatalf("expected hint to open interactively; got: %q", m2.content)
