@@ -3,10 +3,14 @@
 # Default target
 all: lint race build
 
-# Build the application
+# Build the application with platform-appropriate naming
 build:
 	@echo "🔨 Building bc-insights-tui..."
-	go build -o bc-insights-tui.exe
+	@if [ "$(go env GOOS)" = "windows" ]; then \
+		go build -o bc-insights-tui.exe; \
+	else \
+		go build -o bc-insights-tui; \
+	fi
 
 # Run tests
 test:
@@ -36,7 +40,7 @@ vet:
 # Clean build artifacts
 clean:
 	@echo "🧹 Cleaning build artifacts..."
-	rm -f bc-insights-tui.exe bc-insights-tui.test.exe
+	rm -f bc-insights-tui bc-insights-tui.exe bc-insights-tui.test bc-insights-tui.test.exe
 	rm -rf ui_test_output ui_verification_reports custom_ui_output custom_reports
 
 # Run UI tests specifically
