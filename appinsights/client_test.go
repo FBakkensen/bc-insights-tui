@@ -2,6 +2,7 @@ package appinsights
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -282,5 +283,43 @@ func TestQueryStructures(t *testing.T) {
 	}
 	if len(response.Tables) != 1 {
 		t.Errorf("Expected 1 table in response, got %d", len(response.Tables))
+	}
+}
+
+func TestApplyFetchLimitIfNeeded(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		fetch   int
+		applied bool
+		want    string
+		reason  string
+	}{
+		{name: "simple traces adds take", query: "traces", fetch: 50, applied: true, want: "traces | take 50", reason: "applied_table_no_user_limit"},
+		{name: "simple requests adds take", query: "requests | where timestamp > ago(1h)", fetch: 25, applied: true, want: "requests | where timestamp > ago(1h) | take 25", reason: "applied_table_no_user_limit"},
+		{name: "existing take not overridden", query: "traces | take 10", fetch: 100, applied: false, want: "traces | take 10", reason: "user_explicit"},
+		{name: "existing limit not overridden", query: "traces | limit 5", fetch: 100, applied: false, want: "traces | limit 5", reason: "user_explicit"},
+		{name: "case insensitive TAKE not overridden", query: "traces | TAKE 7", fetch: 9, applied: false, want: "traces | TAKE 7", reason: "user_explicit"},
+		{name: "semicolon preserves remainder", query: "traces | where something; requests", fetch: 15, applied: true, want: "traces | where something | take 15; requests", reason: "applied_table_no_user_limit"},
+		{name: "multiline table first", query: "traces\n| where timestamp > ago(1h)", fetch: 30, applied: true, want: "traces\n| where timestamp > ago(1h) | take 30", reason: "applied_table_no_user_limit"},
+		{name: "not a table first token", query: "let x = traces; x | take 5", fetch: 20, applied: false, want: "let x = traces; x | take 5", reason: "not_table_first"},
+		{name: "empty first statement", query: "  ; traces", fetch: 20, applied: false, want: "  ; traces", reason: "empty_stmt"},
+		{name: "fetch zero no-op", query: "traces", fetch: 0, applied: false, want: "traces", reason: "fetch_zero"},
+		{name: "whitespace preserved", query: "  traces  \t", fetch: 3, applied: true, want: "  traces  \t | take 3", reason: "applied_table_no_user_limit"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, applied, reason := applyFetchLimitIfNeeded(tc.query, tc.fetch)
+			if applied != tc.applied {
+				t.Fatalf("applied mismatch: got %v want %v (reason=%s)", applied, tc.applied, reason)
+			}
+			if strings.TrimSpace(got) != strings.TrimSpace(tc.want) {
+				t.Fatalf("query mutated wrong.\n got: %q\nwant: %q", got, tc.want)
+			}
+			if reason != tc.reason {
+				t.Fatalf("reason mismatch: got %q want %q", reason, tc.reason)
+			}
+		})
 	}
 }

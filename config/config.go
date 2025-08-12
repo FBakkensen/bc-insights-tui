@@ -72,6 +72,7 @@ type Config struct {
 	DebugAppInsightsRawEnable   bool   `json:"debug.appInsightsRawEnable" yaml:"debug.appInsightsRawEnable"`
 	DebugAppInsightsRawFile     string `json:"debug.appInsightsRawFile" yaml:"debug.appInsightsRawFile"`
 	DebugAppInsightsRawMaxBytes int    `json:"debug.appInsightsRawMaxBytes" yaml:"debug.appInsightsRawMaxBytes"`
+	DebugAppInsightsRawKeepN    int    `json:"debug.appInsightsRawKeepN" yaml:"debug.appInsightsRawKeepN"`
 }
 
 // NewConfig creates a new Config with default values and initialized mutex
@@ -97,6 +98,7 @@ func NewConfig() Config {
 		DebugAppInsightsRawEnable:   false,
 		DebugAppInsightsRawFile:     "logs/appinsights-raw.yaml",
 		DebugAppInsightsRawMaxBytes: 1048576,
+		DebugAppInsightsRawKeepN:    5,
 	}
 }
 
@@ -205,6 +207,11 @@ func applyAIRawDebugEnvVars(cfg *Config) {
 			cfg.DebugAppInsightsRawMaxBytes = parsed
 		}
 	}
+	if v, ok := os.LookupEnv("BCINSIGHTS_AI_RAW_KEEP_N"); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && parsed >= 0 {
+			cfg.DebugAppInsightsRawKeepN = parsed
+		}
+	}
 }
 
 // mergeConfig merges file configuration into the base config.
@@ -271,6 +278,9 @@ func mergeAIRawDebug(base, file *Config) {
 	if file.DebugAppInsightsRawMaxBytes >= 0 {
 		// Accept 0 (unlimited) and positive
 		base.DebugAppInsightsRawMaxBytes = file.DebugAppInsightsRawMaxBytes
+	}
+	if file.DebugAppInsightsRawKeepN >= 0 {
+		base.DebugAppInsightsRawKeepN = file.DebugAppInsightsRawKeepN
 	}
 }
 
@@ -599,6 +609,7 @@ func (c *Config) ListAllSettings() map[string]string {
 		settings["debug.appInsightsRawFile"] = c.DebugAppInsightsRawFile
 	}
 	settings["debug.appInsightsRawMaxBytes"] = strconv.Itoa(c.DebugAppInsightsRawMaxBytes)
+	settings["debug.appInsightsRawKeepN"] = strconv.Itoa(c.DebugAppInsightsRawKeepN)
 
 	return settings
 }

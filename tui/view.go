@@ -15,6 +15,8 @@ func (m model) View() string {
 		top = m.vpStyle.Render(m.list.View())
 	case modeTableResults:
 		top = m.vpStyle.Render(m.tbl.View())
+	case modeDetails:
+		top = m.vpStyle.Render(m.detailsVP.View())
 	case modeKQLEditor:
 		// Show scrollback in top area while editing
 		top = m.vpStyle.Render(m.vp.View())

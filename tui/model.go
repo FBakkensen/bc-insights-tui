@@ -79,9 +79,18 @@ type model struct {
 	haveResults  bool
 	runningKQL   bool
 
+	// normalized display headers for list views (timestamp, message, customDimensions keys)
+	lastDisplayHeaders []string
+
 	// editor (Step 6)
 	editorDesiredHeight int
 	origPrompt          string
+
+	// details view (Step 9)
+	detailsVP      viewport.Model
+	detailsStart   time.Time
+	detailsContent string
+	detailsRow     int
 }
 
 type uiMode int
@@ -97,6 +106,7 @@ const (
 	modeListSubscriptions
 	modeListInsightsResources
 	modeTableResults
+	modeDetails
 )
 
 // config keys used in TUI (mirror of config.settingAzureSubscriptionID)
@@ -175,6 +185,7 @@ func initialModel(cfg config.Config) model {
 		kqlClient:           nil,
 		editorDesiredHeight: 8,
 		origPrompt:          promptDefault,
+		detailsVP:           viewport.New(80, 20),
 	}
 	m.append("Welcome to bc-insights-tui (chat-first).")
 	m.append("Step 1: Login using Azure Device Flow.")

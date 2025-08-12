@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,6 +126,57 @@ func WriteAIRawRequest(path string, req AIRawCapture) error {
 // WriteAIRawFull writes the full capture atomically.
 func WriteAIRawFull(path string, full AIRawFullCapture) error {
 	return writeYAMLAtomic(path, full)
+}
+
+// WriteAIRawFullRotating writes a rotated capture alongside the main file and prunes to keepN.
+// Example: base logs/appinsights-raw.yaml -> logs/appinsights-raw-20060102T150405.000000000Z.yaml
+// If keepN <= 0, this is a no-op and returns nil.
+func WriteAIRawFullRotating(basePath string, keepN int, full AIRawFullCapture) error {
+	if keepN <= 0 {
+		return nil
+	}
+	if strings.TrimSpace(basePath) == "" {
+		return errors.New("empty base path for AI raw rotating capture")
+	}
+	dir := filepath.Dir(basePath)
+	base := filepath.Base(basePath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	ts := time.Now().UTC().Format("20060102T150405.000000000Z")
+	rotated := filepath.Join(dir, fmt.Sprintf("%s-%s%s", name, ts, ext))
+	if err := writeYAMLAtomic(rotated, full); err != nil {
+		return err
+	}
+	// Prune old rotated files
+	pruneRotated(dir, name, ext, keepN)
+	return nil
+}
+
+// pruneRotated keeps only the newest keepN rotated files with naming pattern name-<timestamp><ext>
+func pruneRotated(dir, name, ext string, keepN int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	prefix := name + "-"
+	var rotated []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		fn := e.Name()
+		if strings.HasPrefix(fn, prefix) && strings.HasSuffix(fn, ext) {
+			rotated = append(rotated, filepath.Join(dir, fn))
+		}
+	}
+	if len(rotated) <= keepN {
+		return
+	}
+	sort.Strings(rotated) // name includes timestamp -> lexicographic sort == chronological
+	toDelete := rotated[0 : len(rotated)-keepN]
+	for _, p := range toDelete {
+		_ = os.Remove(p)
+	}
 }
 
 // ResolvePath ensures a sane default location and extension for the raw file.

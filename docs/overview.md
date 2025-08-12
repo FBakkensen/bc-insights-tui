@@ -35,14 +35,14 @@ The application will run on Windows, feature a low memory footprint, and provide
 
 ## 4. Core Concepts: Business Central Telemetry
 
-A key aspect of Business Central logging is its dynamic and structured nature within Application Insights. Understanding this is crucial for the design of this tool.
+Business Central telemetry in Application Insights is highly dynamic. For our purposes, we treat it as schemaless at the UI layer and render what the service returns without requiring predefined shapes.
 
 * **Primary Data Source:** Most log data is stored in the `traces` table.
-* **The `customDimensions` Field:** While standard columns exist, the most valuable, context-rich information for a log entry is stored in the `customDimensions` field. This field is a flexible key-value store.
-* **The `eventId` as a Schema Definer:** The structure of the data within `customDimensions` is determined by the `eventId`. Each `eventId` represents a specific type of event (e.g., a database lock, a web service call) and has its own unique set of fields within `customDimensions`.
-* **Dynamic and Extensible:** The list of `eventId`s and their corresponding schemas is not fixed. Microsoft adds new events with major releases, and partners can define their own custom events.
+* **The `customDimensions` Field:** While standard columns exist, the most valuable, context-rich information for a log entry is stored in the `customDimensions` field, which is a flexible key-value store. Keys and values can vary by event and over time.
+* **No hard-coded schemas:** We do not infer or enforce per-event schemas (e.g., by `eventId`). Instead, we display the timestamp directly from the row and show all key-value pairs under `customDimensions` as-is.
+* **Dynamic and Extensible:** The set of keys present in `customDimensions` changes across versions and partners. The tool adapts by discovering and rendering these keys dynamically.
 
-This means **bc-insights-tui cannot rely on a static data model**. It must be architected to first read the `eventId` and then dynamically parse and display the associated key-value pairs from `customDimensions`.
+Implication: **bc-insights-tui avoids static models**. The details view reads the row timestamp and renders all fields found in `customDimensions`, sorted and formatted for readability, without relying on `eventId`-driven structure.
 
 ---
 
@@ -106,9 +106,10 @@ Development will proceed in phases to ensure a solid foundation and iterative pr
     * [x] Create the `appinsights` client to make authenticated API calls.
     * [x] Implement a function to execute a basic KQL query that respects the configured fetch size.
     * [x] Create a view to display a list of log entries with default columns.
-    * [ ] **Implement dynamic parsing of `customDimensions` based on `eventId` for the details view.**
+    * [ ] **Implement details view that shows the row timestamp and all fields from `customDimensions` (no per-`eventId` schema).**
     * [ ] Implement pagination logic to "load more" logs.
     * [ ] **Handle API errors and loading states with clear, guiding messages.**
+    * [ ] Implement a great visual way to display the result table, that allows horizontal scrolling, dynamics width of columns, and fit inside the general width and height of the ui.
 * **Phase 4: Advanced Features**
     * [ ] Implement a detailed view for a single log entry.
     * [ ] **Implement a KQL editor for writing and editing custom queries.**
