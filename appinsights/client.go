@@ -14,11 +14,12 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/oauth2"
+
 	cfgpkg "github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/debugdump"
-	util "github.com/FBakkensen/bc-insights-tui/internal/util"
+	"github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
-	"golang.org/x/oauth2"
 )
 
 // Track last-seen raw capture settings to log changes once per process

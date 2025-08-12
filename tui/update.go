@@ -13,7 +13,7 @@ import (
 	"github.com/FBakkensen/bc-insights-tui/appinsights"
 	"github.com/FBakkensen/bc-insights-tui/auth"
 	"github.com/FBakkensen/bc-insights-tui/internal/telemetry"
-	util "github.com/FBakkensen/bc-insights-tui/internal/util"
+	"github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
@@ -702,57 +702,34 @@ func (m *model) renderSnapshot(columns []appinsights.Column, rows [][]interface{
 		return ""
 	}
 	width := m.vp.Width
-	if width <= 0 {
-		width = 80
+	layout := computeColumnLayout(headers, width, 14)
+	if len(layout.visible) == 0 {
+		return ""
 	}
-	const minColWidth = 14
-	colCount := len(headers)
-	visibleCols := colCount
-	ellipsis := false
-	maxFit := width / minColWidth
-	if maxFit < 1 {
-		maxFit = 1
+	cols := make([]table.Column, 0, len(layout.visible)+1)
+	for _, h := range layout.visible {
+		cols = append(cols, table.Column{Title: h, Width: layout.colWidth})
 	}
-	if colCount > maxFit {
-		ellipsis = true
-		visibleCols = maxFit
-	}
-	dataCols := visibleCols
-	if ellipsis && visibleCols > 0 {
-		dataCols = visibleCols - 1
-	}
-	per := width / visibleCols
-	if per < minColWidth {
-		per = minColWidth
-	}
-	cols := make([]table.Column, 0, visibleCols)
-	for i := 0; i < dataCols && i < len(headers); i++ {
-		cols = append(cols, table.Column{Title: headers[i], Width: per})
-	}
-	if ellipsis {
-		hidden := colCount - dataCols
-		if hidden < 0 {
-			hidden = 0
-		}
+	if layout.truncated && layout.hiddenCount > 0 {
 		logging.Info("Snapshot columns truncated",
 			"width", fmt.Sprintf("%d", width),
-			"colCount", fmt.Sprintf("%d", colCount),
-			"visible", fmt.Sprintf("%d", visibleCols),
-			"dataCols", fmt.Sprintf("%d", dataCols),
-			"hidden", fmt.Sprintf("%d", hidden),
+			"colCount", fmt.Sprintf("%d", len(layout.headers)),
+			"visible", fmt.Sprintf("%d", len(layout.visible)),
+			"dataCols", fmt.Sprintf("%d", layout.dataCols),
+			"hidden", fmt.Sprintf("%d", layout.hiddenCount),
 		)
-		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", hidden), Width: per})
+		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", layout.hiddenCount), Width: layout.colWidth})
 	}
 	trows := make([]table.Row, 0, len(data))
 	for _, r := range data {
-		tr := make([]string, 0, visibleCols)
-		for j := 0; j < dataCols && j < len(r); j++ {
+		tr := make([]string, 0, len(cols))
+		for j := 0; j < layout.dataCols && j < len(r); j++ {
 			tr = append(tr, r[j])
 		}
-		for len(tr) < dataCols {
+		for len(tr) < layout.dataCols {
 			tr = append(tr, "")
 		}
-		if ellipsis {
+		if layout.truncated && layout.hiddenCount > 0 {
 			tr = append(tr, "…")
 		}
 		trows = append(trows, tr)
@@ -783,58 +760,35 @@ func (m *model) initInteractiveTable() {
 	}
 	_, data := buildDisplayMatrixFromHeaders(headers, columns, rows)
 	width := m.vp.Width
-	if width <= 0 {
-		width = 80
+	layout := computeColumnLayout(headers, width, 14)
+	if len(layout.visible) == 0 {
+		m.tbl = table.New()
+		return
 	}
-	const minColWidth = 14
-	colCount := len(headers)
-	visibleCols := colCount
-	ellipsis := false
-	maxFit := width / minColWidth
-	if maxFit < 1 {
-		maxFit = 1
+	cols := make([]table.Column, 0, len(layout.visible)+1)
+	for _, h := range layout.visible {
+		cols = append(cols, table.Column{Title: h, Width: layout.colWidth})
 	}
-	if colCount > maxFit {
-		ellipsis = true
-		visibleCols = maxFit
-	}
-	dataCols := visibleCols
-	if ellipsis && visibleCols > 0 {
-		dataCols = visibleCols - 1
-	}
-	per := width / visibleCols
-	if per < minColWidth {
-		per = minColWidth
-	}
-
-	cols := make([]table.Column, 0, visibleCols)
-	for i := 0; i < dataCols && i < len(headers); i++ {
-		cols = append(cols, table.Column{Title: headers[i], Width: per})
-	}
-	if ellipsis {
-		hidden := colCount - dataCols
-		if hidden < 0 {
-			hidden = 0
-		}
+	if layout.truncated && layout.hiddenCount > 0 {
 		logging.Info("Interactive columns truncated",
 			"width", fmt.Sprintf("%d", width),
-			"colCount", fmt.Sprintf("%d", colCount),
-			"visible", fmt.Sprintf("%d", visibleCols),
-			"dataCols", fmt.Sprintf("%d", dataCols),
-			"hidden", fmt.Sprintf("%d", hidden),
+			"colCount", fmt.Sprintf("%d", len(layout.headers)),
+			"visible", fmt.Sprintf("%d", len(layout.visible)),
+			"dataCols", fmt.Sprintf("%d", layout.dataCols),
+			"hidden", fmt.Sprintf("%d", layout.hiddenCount),
 		)
-		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", hidden), Width: per})
+		cols = append(cols, table.Column{Title: fmt.Sprintf("(+%d)", layout.hiddenCount), Width: layout.colWidth})
 	}
 	trows := make([]table.Row, 0, len(data))
 	for _, r := range data {
-		tr := make([]string, 0, visibleCols)
-		for j := 0; j < dataCols && j < len(r); j++ {
+		tr := make([]string, 0, len(cols))
+		for j := 0; j < layout.dataCols && j < len(r); j++ {
 			tr = append(tr, r[j])
 		}
-		for len(tr) < dataCols {
+		for len(tr) < layout.dataCols {
 			tr = append(tr, "")
 		}
-		if ellipsis {
+		if layout.truncated && layout.hiddenCount > 0 {
 			tr = append(tr, "…")
 		}
 		trows = append(trows, tr)
