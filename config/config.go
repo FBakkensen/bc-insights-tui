@@ -73,6 +73,20 @@ type Config struct {
 	DebugAppInsightsRawFile     string `json:"debug.appInsightsRawFile" yaml:"debug.appInsightsRawFile"`
 	DebugAppInsightsRawMaxBytes int    `json:"debug.appInsightsRawMaxBytes" yaml:"debug.appInsightsRawMaxBytes"`
 	DebugAppInsightsRawKeepN    int    `json:"debug.appInsightsRawKeepN" yaml:"debug.appInsightsRawKeepN"`
+
+	// Ranking (dynamic column ranking Step 10)
+	RankEnable            bool    `json:"rank.enable" yaml:"rank.enable"`
+	RankSampleSize        int     `json:"rank.sampleSize" yaml:"rank.sampleSize"`
+	RankDistinctCap       int     `json:"rank.distinctCap" yaml:"rank.distinctCap"`
+	RankLenCap            int     `json:"rank.lenCap" yaml:"rank.lenCap"`
+	RankWeightPresence    float64 `json:"rank.weightPresence" yaml:"rank.weightPresence"`
+	RankWeightVariability float64 `json:"rank.weightVariability" yaml:"rank.weightVariability"`
+	RankWeightLenPenalty  float64 `json:"rank.weightLenPenalty" yaml:"rank.weightLenPenalty"`
+	RankWeightType        float64 `json:"rank.weightType" yaml:"rank.weightType"`
+	RankRegexSpec         string  `json:"rank.regex" yaml:"rank.regex"`
+	RankPinned            string  `json:"rank.pinned" yaml:"rank.pinned"`
+	RankALPrefixBoost     float64 `json:"rank.alPrefixBoost" yaml:"rank.alPrefixBoost"`
+	RankALMinPresence     float64 `json:"rank.alMinPresence" yaml:"rank.alMinPresence"`
 }
 
 // NewConfig creates a new Config with default values and initialized mutex
@@ -99,6 +113,20 @@ func NewConfig() Config {
 		DebugAppInsightsRawFile:     "logs/appinsights-raw.yaml",
 		DebugAppInsightsRawMaxBytes: 1048576,
 		DebugAppInsightsRawKeepN:    5,
+
+		// Ranking defaults per spec
+		RankEnable:            true,
+		RankSampleSize:        200,
+		RankDistinctCap:       50,
+		RankLenCap:            200,
+		RankWeightPresence:    5.0,
+		RankWeightVariability: 2.0,
+		RankWeightLenPenalty:  -1.0,
+		RankWeightType:        0.5,
+		RankRegexSpec:         "", // use built-in defaults if empty
+		RankPinned:            "",
+		RankALPrefixBoost:     3.0,
+		RankALMinPresence:     0.05,
 	}
 }
 
@@ -125,6 +153,7 @@ func applyEnvironmentVariables(cfg *Config) {
 	applyOAuth2EnvVars(cfg)
 	applyKQLEditorEnvVars(cfg)
 	applyAIRawDebugEnvVars(cfg)
+	applyRankingEnvVars(cfg)
 }
 
 // applyBasicEnvVars applies basic configuration environment variables
@@ -212,6 +241,53 @@ func applyAIRawDebugEnvVars(cfg *Config) {
 			cfg.DebugAppInsightsRawKeepN = parsed
 		}
 	}
+}
+
+// applyRankingEnvVars applies environment variable overrides for dynamic column ranking.
+// All variables are optional; invalid parses are ignored to avoid breaking existing flows.
+func applyRankingEnvVars(cfg *Config) { // split helpers keep this orchestrator small
+	parseBool := func(key string, target *bool) {
+		if v, ok := os.LookupEnv(key); ok {
+			lv := strings.ToLower(strings.TrimSpace(v))
+			*target = (lv == "1" || lv == "true" || lv == "yes")
+		}
+	}
+	parseInt := func(key string, target *int, positive bool) {
+		if v, ok := os.LookupEnv(key); ok {
+			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+				if !positive || parsed > 0 {
+					*target = parsed
+				}
+			}
+		}
+	}
+	parseFloat := func(key string, target *float64, validator func(float64) bool) {
+		if v, ok := os.LookupEnv(key); ok {
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				if validator == nil || validator(parsed) {
+					*target = parsed
+				}
+			}
+		}
+	}
+	parseString := func(key string, target *string) {
+		if v, ok := os.LookupEnv(key); ok {
+			*target = v
+		}
+	}
+
+	parseBool("BCINSIGHTS_RANK_ENABLE", &cfg.RankEnable)
+	parseInt("BCINSIGHTS_RANK_SAMPLE_SIZE", &cfg.RankSampleSize, true)
+	parseInt("BCINSIGHTS_RANK_DISTINCT_CAP", &cfg.RankDistinctCap, true)
+	parseInt("BCINSIGHTS_RANK_LEN_CAP", &cfg.RankLenCap, true)
+	parseFloat("BCINSIGHTS_RANK_WEIGHT_PRESENCE", &cfg.RankWeightPresence, nil)
+	parseFloat("BCINSIGHTS_RANK_WEIGHT_VARIABILITY", &cfg.RankWeightVariability, nil)
+	parseFloat("BCINSIGHTS_RANK_WEIGHT_LEN_PENALTY", &cfg.RankWeightLenPenalty, nil)
+	parseFloat("BCINSIGHTS_RANK_WEIGHT_TYPE", &cfg.RankWeightType, nil)
+	parseString("BCINSIGHTS_RANK_REGEX", &cfg.RankRegexSpec)
+	parseString("BCINSIGHTS_RANK_PINNED", &cfg.RankPinned)
+	parseFloat("BCINSIGHTS_RANK_AL_PREFIX_BOOST", &cfg.RankALPrefixBoost, nil)
+	parseFloat("BCINSIGHTS_RANK_AL_MIN_PRESENCE", &cfg.RankALMinPresence, func(f float64) bool { return f >= 0 && f <= 1 })
 }
 
 // mergeConfig merges file configuration into the base config.

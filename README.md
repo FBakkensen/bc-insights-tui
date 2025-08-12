@@ -252,6 +252,67 @@ Example telemetry structure:
 }
 ```
 
+  ## 📊 Dynamic Column Ranking (Step 10)
+
+  When displaying tabular query results the tool dynamically ranks custom dimension keys so the most useful columns appear first without manual configuration. This addresses the highly variable Business Central telemetry schema.
+
+  Scoring dimensions (normalized per key on sampled rows):
+  1. Presence rate (non-empty occurrences / sampled rows)
+  2. Variability (distinct value count up to a cap)
+  3. Length penalty (shorter average values favored; very large average length penalized)
+  4. Type / heuristic bias (boolean-like and small controlled vocabularies boosted)
+  5. Keyword / regex boosts (semantic patterns like request*, *status*, *error*, *duration*, user/session, IDs)
+  6. Optional AL* prefix rule with presence-weighted boost (highlights AL-specific fields)
+
+  Pinned columns (exact names, case-insensitive) are forced to the front (after primaries timestamp, message, eventId) in the specified order before remaining ranked keys.
+
+  ### Configuration (file or JSON)
+  Fields in `config.Config` (defaults in parentheses):
+  - rank.enable (true)
+  - rank.sampleSize (200) – max rows sampled for statistics
+  - rank.distinctCap (50) – cap for variability normalization
+  - rank.lenCap (200) – cap for average length normalization
+  - rank.weightPresence (5.0)
+  - rank.weightVariability (2.0)
+  - rank.weightLenPenalty (-1.0) – negative reduces score as avg length grows
+  - rank.weightType (0.5)
+  - rank.regex ("") – custom regex spec appended to defaults
+  - rank.pinned ("") – comma list (e.g. "companyName,environment,alObjectId")
+  - rank.alPrefixBoost (3.0) – boost applied to ^al.* keys when present rule qualifies
+  - rank.alMinPresence (0.05) – minimum presence rate before AL boost applies
+
+  ### Environment Variables
+  All optional; omit to use defaults.
+  ```
+  BCINSIGHTS_RANK_ENABLE=true|false
+  BCINSIGHTS_RANK_SAMPLE_SIZE=200
+  BCINSIGHTS_RANK_DISTINCT_CAP=50
+  BCINSIGHTS_RANK_LEN_CAP=200
+  BCINSIGHTS_RANK_WEIGHT_PRESENCE=5.0
+  BCINSIGHTS_RANK_WEIGHT_VARIABILITY=2.0
+  BCINSIGHTS_RANK_WEIGHT_LEN_PENALTY=-1.0
+  BCINSIGHTS_RANK_WEIGHT_TYPE=0.5
+  BCINSIGHTS_RANK_REGEX="(?i)alTenant=4;(?i)^cust.*=2"   # format: pattern=boost;pattern=boost OR JSON {"pattern":boost,...}
+  BCINSIGHTS_RANK_PINNED="companyName,environment"
+  BCINSIGHTS_RANK_AL_PREFIX_BOOST=3.0
+  BCINSIGHTS_RANK_AL_MIN_PRESENCE=0.05
+  ```
+
+  Regex spec formats:
+  - Delimited: `pattern=boost;pattern2=boost` (floats allowed)
+  - JSON object: `{"(?i)^foo":2,"(?i)bar$":1.5}`
+  Invalid fragments are ignored with a log entry.
+
+  ### Fallback & Safety
+  If ranking is disabled or errors occur (including a panic) the system falls back to a deterministic alphabetical ordering of discovered keys. Sampling keeps performance predictable on large result sets.
+
+  ### Diagnostics
+  Logs (INFO) include: sample size, total keys, and the top scored keys with component metrics. Enable debug logging for timing details.
+
+  ### Typical Use
+  Leave defaults; optionally pin high-priority business identifiers or add custom regex boosts for domain-specific fields.
+
+
 ## 🛠️ Development
 
 ### Development Workflow

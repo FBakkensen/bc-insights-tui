@@ -122,3 +122,19 @@ Development will proceed in phases to ensure a solid foundation and iterative pr
     * [ ] Create a new TUI view/prompt for natural language input.
     * [ ] Implement logic to send the user's prompt and receive a KQL query.
     * [ ] Allow the user to review, accept, and run the generated query.
+
+---
+
+## 8. Dynamic Column Ranking (Implemented)
+
+The UI ranks discovered `customDimensions` keys to surface the most informative columns first. Ranking combines:
+- Presence rate (non-empty frequency)
+- Variability (distinct values up to a cap)
+- Average value length (penalize overly long textual fields)
+- Heuristic type bias (boolean-like and compact categorical fields)
+- Regex / keyword boosts (request/operation/error/duration/status/user/session/id patterns + optional AL* prefix rule)
+
+Configuration is exposed via `rank.*` fields in `config.Config` and environment variables (`BCINSIGHTS_RANK_*`). Fail-safe fallback reverts to alphabetical ordering if ranking is disabled or errors occur.
+
+Pinned columns can be forced to the front (`rank.pinned` / `BCINSIGHTS_RANK_PINNED`) maintaining deterministic order for business-critical identifiers.
+
