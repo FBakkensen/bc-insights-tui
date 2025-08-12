@@ -634,8 +634,8 @@ func (m model) handleKQLResult(res kqlResultMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	// Build snapshot
-	// Compute normalized display headers once from ALL rows (union of customDimensions keys)
-	m.lastDisplayHeaders = buildHeadersForAllRows(res.columns, res.rows)
+	// Compute canonical headers using ranking (Step 10) with fallback to alphabetical
+	m.lastDisplayHeaders = computeRankedHeaders(res.columns, res.rows, m.cfg)
 	// Log header diagnostics for troubleshooting very wide schemas
 	customCount := 0
 	if len(m.lastDisplayHeaders) >= 2 {

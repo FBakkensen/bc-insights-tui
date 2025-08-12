@@ -10,6 +10,11 @@ import (
 	"github.com/FBakkensen/bc-insights-tui/auth"
 )
 
+const (
+	hdrTimestamp = "timestamp"
+	hdrMessage   = "message"
+)
+
 // Build a KQL result where customDimensions vary across rows to ensure unioning works
 func TestHeaders_BuildFromAllRows_UnionKeys(t *testing.T) {
 	cols := []appinsights.Column{{Name: "timestamp"}, {Name: "message"}, {Name: "customDimensions"}}
@@ -21,7 +26,7 @@ func TestHeaders_BuildFromAllRows_UnionKeys(t *testing.T) {
 	if len(headers) != 5 { // timestamp, message, k1, k2, k3
 		t.Fatalf("expected 5 headers, got %d: %v", len(headers), headers)
 	}
-	if headers[0] != "timestamp" || headers[1] != "message" {
+	if headers[0] != hdrTimestamp || headers[1] != hdrMessage {
 		t.Fatalf("expected first headers timestamp,message; got %v", headers[:2])
 	}
 	// order of custom keys is sorted
@@ -52,7 +57,7 @@ func TestSnapshot_And_Interactive_UseCanonicalHeaders(t *testing.T) {
 	if strings.Contains(snap, "ignored") {
 		t.Fatalf("snapshot should not include non-target column 'ignored'")
 	}
-	if !strings.Contains(snap, "timestamp") || !strings.Contains(snap, "message") {
+	if !strings.Contains(snap, hdrTimestamp) || !strings.Contains(snap, hdrMessage) {
 		t.Fatalf("snapshot should include timestamp and message headers: %q", snap)
 	}
 
