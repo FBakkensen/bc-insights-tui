@@ -507,10 +507,7 @@ func TestRanking_TieAlphabetical(t *testing.T) {
 	}
 	// Lowercase alphabetical order should be: aaa1, aaa2, bbb
 	if idx1 >= idx2 || idx2 >= idxB { // simplified De Morgan
-		for i, h := range headers {
-			t.Logf("%d: %s", i, h)
-		}
-		panic("alphabetical tie-break ordering invalid")
+		t.Fatalf("alphabetical tie-break ordering invalid: got %v", headers)
 	}
 }
 
