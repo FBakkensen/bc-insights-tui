@@ -3,6 +3,7 @@ package appinsights
 // Application Insights API client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,12 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/oauth2"
-
 	cfgpkg "github.com/FBakkensen/bc-insights-tui/config"
 	"github.com/FBakkensen/bc-insights-tui/debugdump"
 	util "github.com/FBakkensen/bc-insights-tui/internal/util"
 	"github.com/FBakkensen/bc-insights-tui/logging"
+	"golang.org/x/oauth2"
 )
 
 // Track last-seen raw capture settings to log changes once per process
@@ -43,6 +43,12 @@ type Client struct {
 	baseURL    string
 	auth       ApplicationInsightsAuthenticator
 	mu         sync.Mutex // Protects token field from concurrent access
+	// snapshot of relevant config to avoid reloading on every query
+	fetchLimit  int
+	rawEnabled  bool
+	rawPath     string
+	rawMaxBytes int
+	rawKeepN    int
 }
 
 // QueryRequest represents a KQL query request
@@ -70,27 +76,41 @@ type Column struct {
 
 // NewClient creates a new Application Insights client
 func NewClient(token *oauth2.Token, appID string) *Client {
+	cfg := cfgpkg.LoadConfigWithArgs(nil)
+	rawEnabled, resolvedPath, maxBytes := getRawCaptureConfigFrom(cfg)
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		token:   token,
-		appID:   appID,
-		baseURL: "https://api.applicationinsights.io",
+		token:       token,
+		appID:       appID,
+		baseURL:     "https://api.applicationinsights.io",
+		fetchLimit:  cfg.LogFetchSize,
+		rawEnabled:  rawEnabled,
+		rawPath:     resolvedPath,
+		rawMaxBytes: maxBytes,
+		rawKeepN:    cfg.DebugAppInsightsRawKeepN,
 	}
 }
 
 // NewClientWithAuthenticator creates a new Application Insights client that will automatically
 // acquire the proper Application Insights API token using the v1 endpoint
 func NewClientWithAuthenticator(authenticator ApplicationInsightsAuthenticator, appID string) *Client {
+	cfg := cfgpkg.LoadConfigWithArgs(nil)
+	rawEnabled, resolvedPath, maxBytes := getRawCaptureConfigFrom(cfg)
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		token:   nil, // Will be acquired on-demand
-		appID:   appID,
-		baseURL: "https://api.applicationinsights.io",
-		auth:    authenticator,
+		token:       nil, // Will be acquired on-demand
+		appID:       appID,
+		baseURL:     "https://api.applicationinsights.io",
+		auth:        authenticator,
+		fetchLimit:  cfg.LogFetchSize,
+		rawEnabled:  rawEnabled,
+		rawPath:     resolvedPath,
+		rawMaxBytes: maxBytes,
+		rawKeepN:    cfg.DebugAppInsightsRawKeepN,
 	}
 }
 
@@ -128,7 +148,7 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	)
 
 	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", queryURL, strings.NewReader(string(bodyJSON)))
+	req, err := http.NewRequestWithContext(ctx, "POST", queryURL, bytes.NewReader(bodyJSON))
 	if err != nil {
 		logging.Error("KQL request creation failed", "error", err.Error())
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -138,13 +158,18 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 
-	// Prepare optional raw debug capture
-	rawEnabled, resolvedPath, maxBytes := getRawCaptureConfig()
+	// Prepare optional raw debug capture (using snapshot)
+	rawEnabled := c.rawEnabled
+	resolvedPath := c.rawPath
+	maxBytes := c.rawMaxBytes
 	checkAndLogRawConfigChange(rawEnabled, resolvedPath, maxBytes)
 
 	// If enabled, write request-only capture first
 	if rawEnabled {
-		writeRawRequestCapture(req, bodyJSON, maxBytes, resolvedPath)
+		startedAt := debugdump.Now()
+		writeRawRequestCapture(req, bodyJSON, maxBytes, resolvedPath, startedAt)
+		// Store startedAt in request context for later completion capture
+		ctx = context.WithValue(ctx, ctxKeyStartedAt{}, startedAt)
 	}
 
 	// Execute request
@@ -160,7 +185,8 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 		logging.Error("KQL request failed", "error", err.Error(), "ctxErr", sel)
 		// Write error-only capture if enabled
 		if rawEnabled {
-			writeRawTransportError(req, bodyJSON, maxBytes, resolvedPath, err, time.Since(start))
+			startedAt, _ := ctx.Value(ctxKeyStartedAt{}).(string)
+			writeRawTransportError(req, bodyJSON, maxBytes, resolvedPath, err, time.Since(start), startedAt, c.rawKeepN)
 		}
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
@@ -188,7 +214,8 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 		)
 		// Write full capture if enabled
 		if rawEnabled {
-			writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, fmt.Sprintf("API request failed with status %d", resp.StatusCode))
+			startedAt, _ := ctx.Value(ctxKeyStartedAt{}).(string)
+			writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, fmt.Sprintf("API request failed with status %d", resp.StatusCode), startedAt, c.rawKeepN)
 		}
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
@@ -222,7 +249,8 @@ func (c *Client) ExecuteQuery(ctx context.Context, query string) (*QueryResponse
 
 	// Write success capture if enabled
 	if rawEnabled {
-		writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, "")
+		startedAt, _ := ctx.Value(ctxKeyStartedAt{}).(string)
+		writeRawHTTPResult(req, bodyJSON, resp, body, maxBytes, resolvedPath, dur, "", startedAt, c.rawKeepN)
 	}
 
 	return &queryResp, nil
@@ -298,17 +326,16 @@ func startsWithKnownTable(stmt string) bool {
 
 // maybeApplyFetchLimit loads config and applies fetch limit if appropriate. It logs a concise decision.
 func (c *Client) maybeApplyFetchLimit(query string) string {
-	cfg := cfgpkg.LoadConfigWithArgs(nil)
-	if cfg.LogFetchSize <= 0 {
-		logging.Debug("KQL fetch limit not applied", "reason", "fetch_zero", "limit", fmt.Sprintf("%d", cfg.LogFetchSize))
+	if c.fetchLimit <= 0 {
+		logging.Debug("KQL fetch limit not applied", "reason", "fetch_zero", "limit", fmt.Sprintf("%d", c.fetchLimit))
 		return query
 	}
-	mutated, applied, reason := applyFetchLimitIfNeeded(query, cfg.LogFetchSize)
+	mutated, applied, reason := applyFetchLimitIfNeeded(query, c.fetchLimit)
 	if applied {
-		logging.Debug("KQL fetch limit applied", "limit", fmt.Sprintf("%d", cfg.LogFetchSize), "reason", reason)
+		logging.Debug("KQL fetch limit applied", "limit", fmt.Sprintf("%d", c.fetchLimit), "reason", reason)
 		return mutated
 	}
-	logging.Debug("KQL fetch limit not applied", "reason", reason, "limit", fmt.Sprintf("%d", cfg.LogFetchSize))
+	logging.Debug("KQL fetch limit not applied", "reason", reason, "limit", fmt.Sprintf("%d", c.fetchLimit))
 	return query
 }
 
@@ -320,9 +347,8 @@ func computeDeadlineFields(ctx context.Context) (string, string) {
 	return "false", ""
 }
 
-// getRawCaptureConfig reads config/env to determine raw capture enablement and resolves path.
-func getRawCaptureConfig() (bool, string, int) {
-	cfg := cfgpkg.LoadConfigWithArgs(nil)
+// getRawCaptureConfigFrom resolves raw capture config from a given config snapshot.
+func getRawCaptureConfigFrom(cfg cfgpkg.Config) (bool, string, int) {
 	if !cfg.DebugAppInsightsRawEnable {
 		return false, "", cfg.DebugAppInsightsRawMaxBytes
 	}
@@ -375,7 +401,7 @@ func checkAndLogRawConfigChange(enabled bool, path string, maxBytes int) {
 }
 
 // writeRawRequestCapture writes the initial request-only capture and logs a start event.
-func writeRawRequestCapture(req *http.Request, bodyJSON []byte, maxBytes int, path string) {
+func writeRawRequestCapture(req *http.Request, bodyJSON []byte, maxBytes int, path, startedAt string) {
 	hdrs := map[string]string{
 		"content-type":  req.Header.Get("Content-Type"),
 		"authorization": req.Header.Get("Authorization"),
@@ -387,7 +413,7 @@ func writeRawRequestCapture(req *http.Request, bodyJSON []byte, maxBytes int, pa
 		Version:    1,
 		CapturedAt: debugdump.Now(),
 		Request: debugdump.AIRawRequest{
-			StartedAt: debugdump.Now(),
+			StartedAt: startedAt,
 			Method:    req.Method,
 			URL:       req.URL.String(),
 			Headers:   red,
@@ -402,11 +428,11 @@ func writeRawRequestCapture(req *http.Request, bodyJSON []byte, maxBytes int, pa
 		logging.Warn("AI raw dump request write failed", "error", werr.Error())
 		return
 	}
-	logging.Info("ai_raw_dump_started", "path", path, "body_bytes", fmt.Sprintf("%d", bodyLen))
+	logging.Debug("ai_raw_dump_started", "path", path, "body_bytes", fmt.Sprintf("%d", bodyLen))
 }
 
 // writeRawTransportError writes a full capture with request details and error message.
-func writeRawTransportError(req *http.Request, bodyJSON []byte, maxBytes int, path string, err error, dur time.Duration) {
+func writeRawTransportError(req *http.Request, bodyJSON []byte, maxBytes int, path string, err error, dur time.Duration, startedAt string, keepN int) {
 	reqHdr := debugdump.RedactHeaders(map[string]string{
 		"content-type":  req.Header.Get("Content-Type"),
 		"authorization": req.Header.Get("Authorization"),
@@ -416,7 +442,7 @@ func writeRawTransportError(req *http.Request, bodyJSON []byte, maxBytes int, pa
 		Version:    1,
 		CapturedAt: debugdump.Now(),
 		Request: debugdump.AIRawRequest{
-			StartedAt: "",
+			StartedAt: startedAt,
 			Method:    req.Method,
 			URL:       req.URL.String(),
 			Headers:   reqHdr,
@@ -427,15 +453,18 @@ func writeRawTransportError(req *http.Request, bodyJSON []byte, maxBytes int, pa
 		Response: nil,
 		Error:    &debugdump.AIRawError{Message: err.Error()},
 	}
+	if keepN > 0 {
+		_ = debugdump.WriteAIRawFullRotating(path, keepN, cap)
+	}
 	if werr := debugdump.WriteAIRawFull(path, cap); werr != nil {
 		logging.Warn("AI raw dump error write failed", "error", werr.Error())
 		return
 	}
-	logging.Info("ai_raw_dump_written", "path", path, "status", "n/a", "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", "0")
+	logging.Debug("ai_raw_dump_written", "path", path, "status", "n/a", "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", "0")
 }
 
 // writeRawHTTPResult writes a full capture for HTTP responses, optionally including an error message.
-func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response, respBody []byte, maxBytes int, path string, dur time.Duration, errMsg string) {
+func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response, respBody []byte, maxBytes int, path string, dur time.Duration, errMsg, startedAt string, keepN int) {
 	rh := map[string]string{
 		"x-ms-request-id":             resp.Header.Get("x-ms-request-id"),
 		"x-ms-correlation-request-id": resp.Header.Get("x-ms-correlation-request-id"),
@@ -450,7 +479,7 @@ func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response,
 		Version:    1,
 		CapturedAt: debugdump.Now(),
 		Request: debugdump.AIRawRequest{
-			StartedAt: "",
+			StartedAt: startedAt,
 			Method:    req.Method,
 			URL:       req.URL.String(),
 			Headers:   debugdump.RedactHeaders(map[string]string{"content-type": req.Header.Get("Content-Type"), "authorization": req.Header.Get("Authorization")}),
@@ -471,12 +500,18 @@ func writeRawHTTPResult(req *http.Request, bodyJSON []byte, resp *http.Response,
 	if strings.TrimSpace(errMsg) != "" {
 		full.Error = &debugdump.AIRawError{Message: errMsg}
 	}
+	if keepN > 0 {
+		_ = debugdump.WriteAIRawFullRotating(path, keepN, full)
+	}
 	if werr := debugdump.WriteAIRawFull(path, full); werr != nil {
 		logging.Warn("AI raw dump full write failed", "error", werr.Error())
 		return
 	}
-	logging.Info("ai_raw_dump_written", "path", path, "status", fmt.Sprintf("%d", resp.StatusCode), "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", fmt.Sprintf("%d", bodyLen))
+	logging.Debug("ai_raw_dump_written", "path", path, "status", fmt.Sprintf("%d", resp.StatusCode), "duration_ms", fmt.Sprintf("%d", dur.Milliseconds()), "resp_bytes", fmt.Sprintf("%d", bodyLen))
 }
+
+// ctxKeyStartedAt is an unexported key type for context values
+type ctxKeyStartedAt struct{}
 
 // getValidToken returns a valid token, acquiring one via authenticator if needed
 func (c *Client) getValidToken(ctx context.Context) (*oauth2.Token, error) {

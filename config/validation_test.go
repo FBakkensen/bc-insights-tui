@@ -417,8 +417,8 @@ func TestListAllSettings(t *testing.T) {
 	}
 
 	// Check that the total count matches expected with debug settings included
-	if len(settings) != 15 {
-		t.Errorf("Expected exactly 15 settings, got %d: %v", len(settings), settings)
+	if len(settings) != 16 {
+		t.Errorf("Expected exactly 16 settings, got %d: %v", len(settings), settings)
 	}
 }
 
