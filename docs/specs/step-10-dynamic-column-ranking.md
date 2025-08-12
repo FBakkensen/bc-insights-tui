@@ -2,15 +2,15 @@
 
 Status: Draft
 Owner: TUI Team
-Last updated: 2025-08-10
+Last updated: 2025-08-12
 
 ## Summary
 
-Rank dynamic columns (customDimensions) for list views so that important fields appear first. Keep timestamp and message as primaries, then order remaining keys using frequency and keyword signals. Maintain one canonical header set (no duplicates) shared by snapshot and interactive views, with consistent ellipsis (+N) semantics.
+Rank dynamic columns (customDimensions) for list views so that important fields appear first. Keep timestamp and message and eventId as primaries, then order remaining keys using frequency and keyword signals. Maintain one canonical header set (no duplicates) shared by snapshot and interactive views, with consistent ellipsis (+N) semantics.
 
 ## Goals
 
-- Fixed primaries first: `timestamp`, `message`.
+- Fixed primaries first: `timestamp`, `message`. `eventId`.
 - Consolidated dynamic headers: case-insensitive union of customDimensions keys; no duplicates.
 - Order custom keys by data-driven signals: frequency, keywords, with stable tie breakers.
 - Deterministic and cheap to compute on a bounded sample (first N rows).
@@ -28,7 +28,7 @@ As a user, when I run a query that returns many dynamic fields, the most useful 
 
 ## Terminology
 
-- Canonical headers: `timestamp`, `message`, plus custom keys discovered across all rows (case-insensitive de-dup, first-seen casing), sorted by ranking; used by both list views.
+- Canonical headers: `timestamp`, `message`, `eventId`, plus custom keys discovered across all rows (case-insensitive de-dup, first-seen casing), sorted by ranking; used by both list views.
 - Sample window: first N rows (default 200) used to compute ranking metrics.
 
 ## Ranking Model
@@ -49,7 +49,7 @@ Tie-breakers: pinned > keyword match count > presenceRate > variability > shorte
 
 ### Primaries and Known-Good Keys
 
-- Always first: `timestamp`, `message`.
+- Always first: `timestamp`, `message`, `eventId`.
 - Known-good keys (optional small set): `requestId`, `operationId`, `correlationId`, `traceId`, `spanId`, `userId`, `sessionId`, `severity`, `category`, `environment`, `tenantId`, `companyId`, `status`, `resultCode`, `durationMs`.
 - Placement: Known-good keys are boosted by keyword rules and/or a small hard offset so they rise naturally without absolute pinning.
 
@@ -63,6 +63,15 @@ Regex patterns (case-insensitive), with additive boosts:
 - `(?i).*(duration|latency|elapsed).*` → +2
 - `(?i).*(user|session|tenant|company|environment).*` → +2
 - `(?i).*(id)$` → +2 (generic ID suffix)
+- `(?i)^al.*` → +3 (Business Central AL telemetry prefix; presence‑weighted, see below)
+
+#### Business Central AL Prefix Rationale
+
+Business Central emits many customDimensions originating from AL code units / objects and these often begin with the prefix `al` (e.g. `alObjectId`, `alMethod`, `alStackFrame`). These fields are typically highly actionable when diagnosing functional issues and should surface early, but only when they are actually present with reasonable coverage. To avoid noise from a single sparse `alSomething` key, the `^al` prefix boost is applied proportionally to its presence rate (presence-weighted keyword boost). Concretely:
+
+`alKeywordContribution = baseBoost * presenceRate`, where `baseBoost` defaults to 3 (configurable). A minimal presence threshold (default 0.05) is enforced; below this, the boost is suppressed (contribution = 0) to prevent rare AL keys from bubbling up.
+
+This keeps dense AL telemetry prominent while ignoring sporadic / experimental fields.
 
 ### Sampling and Metrics
 
@@ -77,7 +86,7 @@ Normalization caps are configuration knobs to keep calculations bounded.
 
 ## Algorithm
 
-1. Discover canonical headers: `timestamp`, `message`, then case-insensitive union of custom keys across all rows; de-duplicate; preserve first-seen casing.
+1. Discover canonical headers: `timestamp`, `message`, `eventId`, then case-insensitive union of custom keys across all rows; de-duplicate; preserve first-seen casing.
 2. Take sample window of up to N rows.
 3. For each custom key, compute metrics and score.
 4. Sort custom keys by score desc; apply tie-breakers.
@@ -98,6 +107,10 @@ Environment variables and config settings (optional, with defaults):
 - BCINSIGHTS_RANK_WEIGHT_TYPE (float, default 0.5)
 - BCINSIGHTS_RANK_REGEX (string, optional; JSON or semicolon spec for custom regex→boost rules)
 - BCINSIGHTS_RANK_PINNED (string, optional; comma-separated keys to pin first after primaries)
+- BCINSIGHTS_RANK_AL_PREFIX_BOOST (float, default 3.0) — base boost applied for `^al` prefix before presence weighting.
+- BCINSIGHTS_RANK_AL_MIN_PRESENCE (float, default 0.05) — minimum presenceRate required for any `^al` boost.
+
+Implementation detail: For consistency the `^al` rule can either be injected into the compiled regex set at runtime with a flag for presence-weighting, or handled as an explicit special-case after regex matching; both approaches must ensure it participates in keyword match counts for tie-breakers when the boost is applied.
 
 Defaults should be hard-coded with config overrides via existing precedence (defaults → file → env → flags).
 
@@ -126,6 +139,8 @@ Unit tests (ranker):
 - Variability boost: categorical fields with multiple distinct values outrank constants.
 - Case-insensitive de-dup: `Foo`, `foo`, `FOO` merge to one header; values map regardless of case.
 - Determinism: same inputs → same order; stable sort under ties.
+- AL prefix weighting: an `alObjectId` key with high presence (>=50%) outranks a similar non-keyword key; an `alRareField` appearing in <5% of sampled rows receives no boost and does not jump ahead of denser diagnostic keys.
+- AL presence scaling: scaling of `^al` boost is linear with presence; verify half presence gives roughly half the keyword contribution (within floating precision tolerance).
 
 UI tests:
 - Header order matches ranker output (verify first few columns).

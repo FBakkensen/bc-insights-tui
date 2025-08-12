@@ -106,7 +106,7 @@ Development will proceed in phases to ensure a solid foundation and iterative pr
     * [x] Create the `appinsights` client to make authenticated API calls.
     * [x] Implement a function to execute a basic KQL query that respects the configured fetch size.
     * [x] Create a view to display a list of log entries with default columns.
-    * [ ] **Implement details view that shows the row timestamp and all fields from `customDimensions` (no per-`eventId` schema).**
+    * [x] **Implement details view that shows the row timestamp and all fields from `customDimensions` (no per-`eventId` schema).**
     * [ ] Implement pagination logic to "load more" logs.
     * [ ] **Handle API errors and loading states with clear, guiding messages.**
     * [ ] Implement a great visual way to display the result table, that allows horizontal scrolling, dynamics width of columns, and fit inside the general width and height of the ui.
