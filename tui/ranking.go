@@ -30,32 +30,30 @@ type rankRule struct {
 // computeRankedHeaders is the public entry used by the model to derive header ordering.
 func computeRankedHeaders(columns []appinsights.Column, rows [][]interface{}, cfg config.Config) []string {
 	if !cfg.RankEnable {
-		return buildHeadersForAllRowsFallback(columns, rows)
+		return buildHeadersForAllRowsFallback(columns, rows, cfg)
 	}
 	start := time.Now()
+	headers := []string{}
 	defer func() {
 		if r := recover(); r != nil {
 			logging.Error("Ranking panic; falling back", "error", fmt.Sprintf("%v", r))
+			headers = buildHeadersForAllRowsFallback(columns, rows, cfg)
 		} else {
 			logging.Debug("Ranking executed", "took_ms", fmt.Sprintf("%d", time.Since(start).Milliseconds()))
 		}
 	}()
-	headers, err := rankHeaders(columns, rows, cfg)
-	if err != nil {
-		logging.Error("Ranking failed; fallback alphabetical", "error", err.Error())
-		return buildHeadersForAllRowsFallback(columns, rows)
-	}
+	headers = rankHeaders(columns, rows, cfg)
 	return headers
 }
 
 // rankHeaders orchestrates sampling, stat accumulation, scoring and ordering.
-func rankHeaders(columns []appinsights.Column, rows [][]interface{}, cfg config.Config) ([]string, error) {
+func rankHeaders(columns []appinsights.Column, rows [][]interface{}, cfg config.Config) []string {
 	if len(rows) == 0 {
-		return []string{"timestamp", "message"}, nil
+		return []string{"timestamp", "message"}
 	}
 	keys := discoverCanonicalKeys(columns, rows)
 	if len(keys) == 0 {
-		return []string{"timestamp", "message"}, nil
+		return []string{"timestamp", "message"}
 	}
 	sample, sampleSize := selectSample(rows, cfg.RankSampleSize)
 	distinctCap, lenCap := normalizeCaps(cfg.RankDistinctCap, cfg.RankLenCap)
@@ -67,7 +65,7 @@ func rankHeaders(columns []appinsights.Column, rows [][]interface{}, cfg config.
 	orderedStats := sortStats(stats, pinnedMap)
 	headers := assembleHeaders(orderedStats)
 	logDiagnostics(orderedStats, sampleSize, len(keys))
-	return headers, nil
+	return headers
 }
 
 func computeBaseMetrics(s *keyStats, distinctCap, lenCap int) {
@@ -80,9 +78,9 @@ func computeBaseMetrics(s *keyStats, distinctCap, lenCap int) {
 	if s.nonEmpty > 0 {
 		s.avgLen = float64(s.totalLen) / float64(s.nonEmpty)
 	}
-	s.lenPenalty = s.avgLen / float64(lenCap)
-	if s.lenPenalty > 1 {
-		s.lenPenalty = 1
+	s.lenRatio = s.avgLen / float64(lenCap)
+	if s.lenRatio > 1 {
+		s.lenRatio = 1
 	}
 }
 
@@ -105,12 +103,16 @@ func applyRuleBoosts(s *keyStats, rules []rankRule, alMinPresence float64) {
 			continue
 		}
 		contrib := rule.boost
-		if rule.presenceWeighted {
+		if rule.presenceWeighted { // AL prefix style: already presence gated
 			if s.presenceRate >= alMinPresence {
 				contrib *= s.presenceRate
 			} else {
 				contrib = 0
 			}
+		} else {
+			// Mitigation for empty early columns: scale all other keyword boosts by presence rate
+			// so extremely sparse keys cannot dominate solely via keyword/rule matches.
+			contrib *= s.presenceRate
 		}
 		if contrib != 0 {
 			s.keywordBoost += contrib
@@ -131,7 +133,7 @@ type keyStats struct {
 	presenceRate   float64
 	variability    float64
 	avgLen         float64
-	lenPenalty     float64
+	lenRatio       float64 // avgLen/lenCap (capped 1); weighted (likely negative) to penalize verbosity
 	typeBias       float64
 	keywordBoost   float64
 	keywordMatches int
@@ -141,8 +143,70 @@ type keyStats struct {
 
 // (duplicate computeRankedHeaders removed; single definition kept at top of file)
 
-func buildHeadersForAllRowsFallback(columns []appinsights.Column, rows [][]interface{}) []string {
-	return buildHeadersForAllRows(columns, rows)
+// buildHeadersForAllRowsFallback builds a deterministic header ordering when ranking is disabled
+// or a panic occurs. It preserves key discovery (case-insensitive de-dup, first-seen casing) and
+// applies limited priority semantics:
+// 1. Primaries: timestamp, message, optional eventId (if present in custom keys)
+// 2. Pinned keys (cfg.RankPinned order) excluding primaries
+// 3. Remaining keys case-insensitive alphabetical.
+func buildHeadersForAllRowsFallback(columns []appinsights.Column, rows [][]interface{}, cfg config.Config) []string {
+	if len(rows) == 0 {
+		return []string{"timestamp", "message"}
+	}
+	keys := discoverCanonicalKeys(columns, rows)
+	lowerIndex := make(map[string]int, len(keys))
+	for i, k := range keys {
+		lowerIndex[strings.ToLower(k)] = i
+	}
+	primaries := []string{"timestamp", "message"}
+	eventLower := "eventid"
+	if _, ok := lowerIndex[eventLower]; ok {
+		primaries = append(primaries, "eventId") // canonical casing
+		delete(lowerIndex, eventLower)
+	}
+	// Build set of remaining keys excluding eventId if promoted
+	remaining := make([]string, 0, len(lowerIndex))
+	for _, k := range keys {
+		lk := strings.ToLower(k)
+		if lk == eventLower {
+			continue
+		}
+		remaining = append(remaining, k)
+	}
+	// Pinned ordering
+	pinnedOrder := parsePinnedList(cfg.RankPinned)
+	pinnedOut := make([]string, 0, len(pinnedOrder))
+	used := map[string]struct{}{}
+	for _, p := range pinnedOrder {
+		lp := strings.ToLower(p)
+		if lp == eventLower { // already a primary
+			continue
+		}
+		for _, k := range remaining {
+			if strings.ToLower(k) == lp {
+				pinnedOut = append(pinnedOut, k)
+				used[lp] = struct{}{}
+				break
+			}
+		}
+	}
+	// Collect non-pinned
+	nonPinned := make([]string, 0, len(remaining))
+	for _, k := range remaining {
+		lk := strings.ToLower(k)
+		if _, ok := used[lk]; ok {
+			continue
+		}
+		nonPinned = append(nonPinned, k)
+	}
+	sort.Slice(nonPinned, func(i, j int) bool {
+		li, lj := strings.ToLower(nonPinned[i]), strings.ToLower(nonPinned[j])
+		if li == lj {
+			return nonPinned[i] < nonPinned[j]
+		}
+		return li < lj
+	})
+	return append(append(primaries, pinnedOut...), nonPinned...)
 }
 
 // (duplicate rankHeaders and helpers removed)
@@ -227,12 +291,16 @@ func accumulateStats(stats map[string]*keyStats, keys []string, columns []appins
 	for i, k := range keys {
 		lowerKeys[i] = strings.ToLower(k)
 	}
-	// Scratch map reused per row (capacity grows to max fields)
-	scratch := make(map[string]string, 32)
+	// Scratch map reused per row; clearing entries cheaper than realloc for typical widths.
+	scratch := make(map[string]string, 64)
 	for _, r := range sample {
-		// reset scratch without reallocating: delete existing entries
-		for k := range scratch {
-			delete(scratch, k)
+		// Clear scratch map in-place. If it has grown excessively (heuristic >4096 entries) recreate to cap memory.
+		if len(scratch) > 4096 {
+			scratch = make(map[string]string, 64)
+		} else {
+			for k := range scratch {
+				delete(scratch, k)
+			}
 		}
 		_, _, fields := telemetry.BuildDetails(columns, r)
 		for _, f := range fields {
@@ -268,6 +336,9 @@ func accumulateStats(stats map[string]*keyStats, keys []string, columns []appins
 }
 
 // scoreStats converts raw counters into a final score per key.
+// score = weightPresence*presenceRate + weightVariability*variability + keywordBoost + weightLenPenalty*lenRatio + weightType*typeBias
+// where lenRatio = avgLen/lenCap (capped 1).
+// Side effects: sets s.score and s.pinned.
 func scoreStats(stats map[string]*keyStats, rules []rankRule, cfg config.Config, distinctCap, lenCap int, alMinPresence float64, pinnedMap map[string]int) {
 	for _, s := range stats {
 		if s.occurrences == 0 {
@@ -276,7 +347,9 @@ func scoreStats(stats map[string]*keyStats, rules []rankRule, cfg config.Config,
 		computeBaseMetrics(s, distinctCap, lenCap)
 		applyTypeBiases(s)
 		applyRuleBoosts(s, rules, alMinPresence)
-		s.score = cfg.RankWeightPresence*s.presenceRate + cfg.RankWeightVariability*s.variability + s.keywordBoost + cfg.RankWeightLenPenalty*s.lenPenalty + cfg.RankWeightType*s.typeBias
+		// Scale variability by presence rate so ultra-sparse unique keys don't overshadow dense informative ones.
+		varComponent := cfg.RankWeightVariability * (s.variability * s.presenceRate)
+		s.score = cfg.RankWeightPresence*s.presenceRate + varComponent + s.keywordBoost + cfg.RankWeightLenPenalty*s.lenRatio + cfg.RankWeightType*s.typeBias
 		if _, ok := pinnedMap[strings.ToLower(s.key)]; ok {
 			s.pinned = true
 		}
@@ -308,10 +381,10 @@ func sortStats(stats map[string]*keyStats, pinnedMap map[string]int) []*keyStats
 			return a.variability > b.variability
 		case a.avgLen != b.avgLen:
 			return a.avgLen < b.avgLen
-		case ai != bj:
+		case ai != bj: // final deterministic case-insensitive alphabetical ordering
 			return ai < bj
 		default:
-			return a.key < b.key
+			return false
 		}
 	})
 	return arr
@@ -321,7 +394,7 @@ func assembleHeaders(arr []*keyStats) []string {
 	orderedKeys := make([]string, 0, len(arr))
 	hasEventID := false
 	for _, s := range arr {
-		if strings.ToLower(s.key) == "eventid" {
+		if strings.EqualFold(s.key, "eventId") { // treat any casing as primary candidate
 			hasEventID = true
 			continue
 		}
@@ -329,6 +402,7 @@ func assembleHeaders(arr []*keyStats) []string {
 	}
 	primaries := []string{"timestamp", "message"}
 	if hasEventID {
+		// Preserve canonical casing 'eventId'
 		primaries = append(primaries, "eventId")
 	}
 	return append(primaries, orderedKeys...)
@@ -378,12 +452,17 @@ func parseRankRegexSpec(spec string) ([]rankRule, error) {
 	if strings.HasPrefix(spec, "{") {
 		var m map[string]float64
 		if err := json.Unmarshal([]byte(spec), &m); err != nil {
-			return nil, err
+			// Attempt lenient recovery: try to salvage simple pattern=boost pairs inside braces by naive splitting
+			// Fall through to best-effort semicolon style after trimming braces.
+			inner := strings.Trim(spec, "{}")
+			semSpec := strings.ReplaceAll(inner, ",", ";")
+			return parseRankRegexSpec(semSpec)
 		}
 		for pattern, boost := range m {
 			re, err := regexp.Compile(pattern)
 			if err != nil {
-				return nil, err
+				logging.Warn("Invalid custom regex skipped", "pattern", pattern, "error", err.Error())
+				continue
 			}
 			rules = append(rules, rankRule{re: re, boost: boost})
 		}
@@ -397,20 +476,24 @@ func parseRankRegexSpec(spec string) ([]rankRule, error) {
 		}
 		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
-			return nil, fmt.Errorf("invalid rank regex part: %s", part)
+			logging.Warn("Invalid custom regex fragment skipped", "fragment", part)
+			continue
 		}
 		pattern := strings.TrimSpace(kv[0])
 		boostStr := strings.TrimSpace(kv[1])
 		if pattern == "" || boostStr == "" {
-			return nil, fmt.Errorf("invalid rank regex entry: %s", part)
+			logging.Warn("Empty pattern or boost skipped", "fragment", part)
+			continue
 		}
 		boost, err := strconv.ParseFloat(boostStr, 64)
 		if err != nil {
-			return nil, err
+			logging.Warn("Invalid boost skipped", "fragment", part, "error", err.Error())
+			continue
 		}
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return nil, err
+			logging.Warn("Invalid regex skipped", "pattern", pattern, "error", err.Error())
+			continue
 		}
 		rules = append(rules, rankRule{re: re, boost: boost})
 	}

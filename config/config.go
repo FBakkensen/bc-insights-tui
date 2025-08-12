@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/FBakkensen/bc-insights-tui/logging"
 )
 
 const (
@@ -245,49 +247,81 @@ func applyAIRawDebugEnvVars(cfg *Config) {
 
 // applyRankingEnvVars applies environment variable overrides for dynamic column ranking.
 // All variables are optional; invalid parses are ignored to avoid breaking existing flows.
-func applyRankingEnvVars(cfg *Config) { // split helpers keep this orchestrator small
-	parseBool := func(key string, target *bool) {
-		if v, ok := os.LookupEnv(key); ok {
-			lv := strings.ToLower(strings.TrimSpace(v))
-			*target = (lv == "1" || lv == "true" || lv == "yes")
-		}
-	}
-	parseInt := func(key string, target *int, positive bool) {
-		if v, ok := os.LookupEnv(key); ok {
-			if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-				if !positive || parsed > 0 {
-					*target = parsed
-				}
-			}
-		}
-	}
-	parseFloat := func(key string, target *float64, validator func(float64) bool) {
-		if v, ok := os.LookupEnv(key); ok {
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-				if validator == nil || validator(parsed) {
-					*target = parsed
-				}
-			}
-		}
-	}
-	parseString := func(key string, target *string) {
-		if v, ok := os.LookupEnv(key); ok {
-			*target = v
-		}
-	}
+func applyRankingEnvVars(cfg *Config) { // delegates to small parse helpers to keep complexity low
+	parseBoolEnv("BCINSIGHTS_RANK_ENABLE", "rank.enable", &cfg.RankEnable)
+	parseIntEnv("BCINSIGHTS_RANK_SAMPLE_SIZE", "rank.sampleSize", &cfg.RankSampleSize, true)
+	parseIntEnv("BCINSIGHTS_RANK_DISTINCT_CAP", "rank.distinctCap", &cfg.RankDistinctCap, true)
+	parseIntEnv("BCINSIGHTS_RANK_LEN_CAP", "rank.lenCap", &cfg.RankLenCap, true)
+	parseFloatEnv("BCINSIGHTS_RANK_WEIGHT_PRESENCE", "rank.weightPresence", &cfg.RankWeightPresence, nil)
+	parseFloatEnv("BCINSIGHTS_RANK_WEIGHT_VARIABILITY", "rank.weightVariability", &cfg.RankWeightVariability, nil)
+	parseFloatEnv("BCINSIGHTS_RANK_WEIGHT_LEN_PENALTY", "rank.weightLenPenalty", &cfg.RankWeightLenPenalty, nil)
+	parseFloatEnv("BCINSIGHTS_RANK_WEIGHT_TYPE", "rank.weightType", &cfg.RankWeightType, nil)
+	parseStringEnv("BCINSIGHTS_RANK_REGEX", "rank.regex", &cfg.RankRegexSpec)
+	parseStringEnv("BCINSIGHTS_RANK_PINNED", "rank.pinned", &cfg.RankPinned)
+	parseFloatEnv("BCINSIGHTS_RANK_AL_PREFIX_BOOST", "rank.alPrefixBoost", &cfg.RankALPrefixBoost, nil)
+	parseFloatEnv("BCINSIGHTS_RANK_AL_MIN_PRESENCE", "rank.alMinPresence", &cfg.RankALMinPresence, func(f float64) bool { return f >= 0 && f <= 1 })
+}
 
-	parseBool("BCINSIGHTS_RANK_ENABLE", &cfg.RankEnable)
-	parseInt("BCINSIGHTS_RANK_SAMPLE_SIZE", &cfg.RankSampleSize, true)
-	parseInt("BCINSIGHTS_RANK_DISTINCT_CAP", &cfg.RankDistinctCap, true)
-	parseInt("BCINSIGHTS_RANK_LEN_CAP", &cfg.RankLenCap, true)
-	parseFloat("BCINSIGHTS_RANK_WEIGHT_PRESENCE", &cfg.RankWeightPresence, nil)
-	parseFloat("BCINSIGHTS_RANK_WEIGHT_VARIABILITY", &cfg.RankWeightVariability, nil)
-	parseFloat("BCINSIGHTS_RANK_WEIGHT_LEN_PENALTY", &cfg.RankWeightLenPenalty, nil)
-	parseFloat("BCINSIGHTS_RANK_WEIGHT_TYPE", &cfg.RankWeightType, nil)
-	parseString("BCINSIGHTS_RANK_REGEX", &cfg.RankRegexSpec)
-	parseString("BCINSIGHTS_RANK_PINNED", &cfg.RankPinned)
-	parseFloat("BCINSIGHTS_RANK_AL_PREFIX_BOOST", &cfg.RankALPrefixBoost, nil)
-	parseFloat("BCINSIGHTS_RANK_AL_MIN_PRESENCE", &cfg.RankALMinPresence, func(f float64) bool { return f >= 0 && f <= 1 })
+// The following parsing helpers centralize logging & validation to reduce branching in applyRankingEnvVars.
+func parseBoolEnv(key, logical string, target *bool) {
+	if v, ok := os.LookupEnv(key); ok {
+		old := *target
+		lv := strings.ToLower(strings.TrimSpace(v))
+		*target = (lv == "1" || lv == "true" || lv == "yes")
+		if old != *target {
+			logging.Info("Config override", "key", logical, "old", fmt.Sprintf("%t", old), "new", fmt.Sprintf("%t", *target))
+		}
+	}
+}
+
+func parseIntEnv(key, logical string, target *int, positive bool) {
+	if v, ok := os.LookupEnv(key); ok {
+		old := *target
+		trimmed := strings.TrimSpace(v)
+		parsed, err := strconv.Atoi(trimmed)
+		if err != nil {
+			logging.Warn("Invalid int env ignored", "key", logical, "value", trimmed, "error", err.Error())
+			return
+		}
+		if positive && parsed <= 0 {
+			logging.Warn("Non-positive int env ignored", "key", logical, "value", trimmed)
+			return
+		}
+		if old != parsed {
+			*target = parsed
+			logging.Info("Config override", "key", logical, "old", fmt.Sprintf("%d", old), "new", fmt.Sprintf("%d", parsed))
+		}
+	}
+}
+
+func parseFloatEnv(key, logical string, target *float64, validator func(float64) bool) {
+	if v, ok := os.LookupEnv(key); ok {
+		old := *target
+		trimmed := strings.TrimSpace(v)
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			logging.Warn("Invalid float env ignored", "key", logical, "value", trimmed, "error", err.Error())
+			return
+		}
+		if validator != nil && !validator(parsed) {
+			logging.Warn("Float env failed validation", "key", logical, "value", trimmed)
+			return
+		}
+		if old != parsed {
+			*target = parsed
+			logging.Info("Config override", "key", logical, "old", fmt.Sprintf("%g", old), "new", fmt.Sprintf("%g", parsed))
+		}
+	}
+}
+
+func parseStringEnv(key, logical string, target *string) {
+	if v, ok := os.LookupEnv(key); ok {
+		old := *target
+		if old != v {
+			*target = v
+			logging.Info("Config override", "key", logical, "old", old, "new", v)
+		}
+	}
 }
 
 // mergeConfig merges file configuration into the base config.
@@ -296,6 +330,7 @@ func mergeConfig(base, file *Config) {
 	mergeOAuth2(base, file)
 	mergeKQLEditor(base, file)
 	mergeAIRawDebug(base, file)
+	mergeRanking(base, file)
 }
 
 func mergeBasic(base, file *Config) {
@@ -357,6 +392,47 @@ func mergeAIRawDebug(base, file *Config) {
 	}
 	if file.DebugAppInsightsRawKeepN >= 0 {
 		base.DebugAppInsightsRawKeepN = file.DebugAppInsightsRawKeepN
+	}
+}
+
+// mergeRanking merges ranking-related overrides from file into base.
+func mergeRanking(base, file *Config) {
+	if file.RankSampleSize > 0 {
+		base.RankSampleSize = file.RankSampleSize
+	}
+	if file.RankDistinctCap > 0 {
+		base.RankDistinctCap = file.RankDistinctCap
+	}
+	if file.RankLenCap > 0 {
+		base.RankLenCap = file.RankLenCap
+	}
+	if file.RankWeightPresence != 0 { // allow negative handled below individually
+		base.RankWeightPresence = file.RankWeightPresence
+	}
+	if file.RankWeightVariability != 0 {
+		base.RankWeightVariability = file.RankWeightVariability
+	}
+	if file.RankWeightLenPenalty != 0 { // negative allowed (penalty)
+		base.RankWeightLenPenalty = file.RankWeightLenPenalty
+	}
+	if file.RankWeightType != 0 {
+		base.RankWeightType = file.RankWeightType
+	}
+	if file.RankRegexSpec != "" {
+		base.RankRegexSpec = file.RankRegexSpec
+	}
+	if file.RankPinned != "" {
+		base.RankPinned = file.RankPinned
+	}
+	if file.RankALPrefixBoost != 0 { // keep zero meaning allow disabling only via env/flags? choose to merge if non-zero
+		base.RankALPrefixBoost = file.RankALPrefixBoost
+	}
+	if file.RankALMinPresence >= 0 { // allow 0
+		base.RankALMinPresence = file.RankALMinPresence
+	}
+	// Enable flag merges explicit true or false (explicit override)
+	if file.RankEnable != base.RankEnable { // if file sets different value (including false)
+		base.RankEnable = file.RankEnable
 	}
 }
 
